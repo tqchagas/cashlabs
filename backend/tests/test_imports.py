@@ -79,3 +79,31 @@ def test_pending_review_list_and_confirm(client: TestClient, user_token: str) ->
     txs = client.get("/transactions?query=Item sem data", headers=headers)
     assert txs.status_code == 200
     assert len(txs.json()) == 1
+
+
+def test_csv_import_with_alternative_headers(client: TestClient, user_token: str) -> None:
+    headers = {"Authorization": f"Bearer {user_token}"}
+    content = (
+        "Data Lançamento,Estabelecimento,Valor (R$)\n"
+        "23/02/2026,Cafeteria,45,90 DR\n"
+        "24/02/2026,Salario,5000,00 CR\n"
+    )
+    # keep comma decimal in a quoted-safe CSV for parser
+    content = (
+        "Data Lançamento,Estabelecimento,Valor (R$)\n"
+        "23/02/2026,Cafeteria,\"45,90 DR\"\n"
+        "24/02/2026,Salario,\"5000,00 CR\"\n"
+    )
+
+    resp = client.post(
+        "/imports/tabular",
+        headers=headers,
+        files={"file": ("alt_headers.csv", content, "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 2
+
+    txs = client.get("/transactions", headers=headers)
+    assert txs.status_code == 200
+    values = sorted([tx["amount_cents"] for tx in txs.json()])
+    assert values == [-4590, 500000]

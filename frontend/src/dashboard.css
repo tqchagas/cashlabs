@@ -150,6 +150,17 @@
   background: #f8fafc;
 }
 
+.review-form {
+  padding: 16px 0;
+}
+
+.raw-json {
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .summary-grid,
 .cta-grid {
   display: grid;

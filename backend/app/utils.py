@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import re
+import unicodedata
 from datetime import date, datetime
 
 import msoffcrypto
@@ -33,11 +35,47 @@ def parse_amount_to_cents(value: str | float | int) -> int:
         return int(round(value * 100))
 
     raw = str(value).strip().replace("R$", "").replace(" ", "")
+    lower = raw.lower()
+    negative = any(token in lower for token in ["debito", "débito", "debit", "dr"])
+    positive = any(token in lower for token in ["credito", "crédito", "credit", "cr"])
+    raw = re.sub(r"[A-Za-zÀ-ÿ]", "", raw)
+    raw = raw.strip()
+    if raw.endswith("-"):
+        negative = True
+        raw = raw[:-1]
+    if raw.startswith("+"):
+        positive = True
+        raw = raw[1:]
+    if raw.startswith("-"):
+        negative = True
     if "," in raw and "." in raw:
         raw = raw.replace(".", "").replace(",", ".")
     elif "," in raw:
         raw = raw.replace(",", ".")
-    return int(round(float(raw) * 100))
+    cents = int(round(float(raw) * 100))
+    if negative and cents > 0:
+        return -cents
+    if positive and cents < 0:
+        return -cents
+    return cents
+
+
+def normalize_header(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-zA-Z0-9]+", " ", text).strip().lower()
+    return " ".join(text.split())
+
+
+def find_header_key(headers: dict[str, str], candidates: list[str]) -> str | None:
+    normalized_candidates = {normalize_header(item) for item in candidates}
+    for norm, original in headers.items():
+        if norm in normalized_candidates:
+            return original
+
+    for norm, original in headers.items():
+        if any(candidate in norm for candidate in normalized_candidates):
+            return original
+    return None
 
 
 def add_months(iso_date: str, months: int) -> str:
@@ -90,11 +128,56 @@ def map_row(row: dict, mapping: dict | None = None) -> dict:
         value_key = mapping.get("value")
         category_key = mapping.get("category")
     else:
-        keys = {str(k).strip().lower(): k for k in row.keys()}
-        date_key = keys.get("data") or keys.get("date")
-        desc_key = keys.get("descricao") or keys.get("descrição") or keys.get("description")
-        value_key = keys.get("valor") or keys.get("value")
-        category_key = keys.get("categoria") or keys.get("category")
+        keys = {normalize_header(str(k)): k for k in row.keys()}
+        date_key = find_header_key(
+            keys,
+            [
+                "data",
+                "date",
+                "data compra",
+                "data lancamento",
+                "data transacao",
+                "transaction date",
+                "posting date",
+                "competencia",
+            ],
+        )
+        desc_key = find_header_key(
+            keys,
+            [
+                "descricao",
+                "description",
+                "historico",
+                "lancamento",
+                "estabelecimento",
+                "merchant",
+                "detalhes",
+                "texto",
+            ],
+        )
+        value_key = find_header_key(
+            keys,
+            [
+                "valor",
+                "value",
+                "amount",
+                "valor rs",
+                "total",
+                "preco",
+                "price",
+                "valor final",
+                "valor transacao",
+            ],
+        )
+        category_key = find_header_key(
+            keys,
+            [
+                "categoria",
+                "category",
+                "tipo",
+                "segmento",
+            ],
+        )
 
     if not date_key or not desc_key or not value_key:
         raise ValueError("mapping_not_found")

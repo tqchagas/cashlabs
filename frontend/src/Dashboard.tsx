@@ -24,6 +24,15 @@ type CategoryTotal = {
   total_cents: number;
 };
 
+type PendingReviewItem = {
+  id: number;
+  import_id: number;
+  row_number: number;
+  raw_data: string;
+  error: string;
+  suggested_account_id: number | null;
+};
+
 type DashboardProps = {
   token: string;
   apiBaseUrl: string;
@@ -50,6 +59,11 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
   const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [pendingItems, setPendingItems] = useState<PendingReviewItem[]>([]);
+  const [reviewDate, setReviewDate] = useState("");
+  const [reviewDescription, setReviewDescription] = useState("");
+  const [reviewAmountCents, setReviewAmountCents] = useState("");
+  const [selectedPendingId, setSelectedPendingId] = useState<number | null>(null);
 
   const [showImport, setShowImport] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -63,14 +77,19 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
     setLoading(true);
     setMessage("");
     try {
-      const [summaryRes, categoriesRes, transactionsRes] = await Promise.all([
+      const [summaryRes, categoriesRes, transactionsRes, pendingRes] = await Promise.all([
         api.get<MonthlySummary>(`/reports/monthly?year=${year}&month=${month}`, { headers: authHeaders }),
         api.get<CategoryTotal[]>(`/reports/by-category?year=${year}&month=${month}`, { headers: authHeaders }),
         api.get<Transaction[]>("/transactions", { headers: authHeaders }),
+        api.get<PendingReviewItem[]>("/imports/pending", { headers: authHeaders }),
       ]);
       setSummary(summaryRes.data);
       setCategoryTotals(categoriesRes.data);
       setTransactions(transactionsRes.data.slice(0, 8));
+      setPendingItems(pendingRes.data);
+      if (pendingRes.data.length > 0 && selectedPendingId === null) {
+        prefillFromPending(pendingRes.data[0]);
+      }
     } catch (error: any) {
       if (error?.response?.status === 401 && onLogout) {
         onLogout();
@@ -85,6 +104,68 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
   useEffect(() => {
     void loadDashboardData();
   }, []);
+
+  function prefillFromPending(item: PendingReviewItem) {
+    setSelectedPendingId(item.id);
+    try {
+      const raw = JSON.parse(item.raw_data) as Record<string, string>;
+      const dateCandidate =
+        raw["Data"] ||
+        raw["data"] ||
+        raw["Data Lançamento"] ||
+        raw["Data Lancamento"] ||
+        raw["Date"] ||
+        "";
+      const descriptionCandidate =
+        raw["Descricao"] ||
+        raw["Descrição"] ||
+        raw["Estabelecimento"] ||
+        raw["description"] ||
+        raw["Lançamento"] ||
+        "";
+      const valueCandidate = raw["Valor"] || raw["Valor (R$)"] || raw["amount"] || "";
+      setReviewDate(String(dateCandidate).slice(0, 10));
+      setReviewDescription(String(descriptionCandidate));
+      setReviewAmountCents(
+        String(valueCandidate).replace(/[^\d-]/g, "") || ""
+      );
+    } catch {
+      setReviewDate("");
+      setReviewDescription("");
+      setReviewAmountCents("");
+    }
+  }
+
+  async function confirmPendingItem() {
+    if (!selectedPendingId) {
+      setMessage("Select a pending line first.");
+      return;
+    }
+    if (!reviewDate || !reviewDescription || !reviewAmountCents) {
+      setMessage("Fill date, description and amount (cents) to confirm.");
+      return;
+    }
+    try {
+      const payload = {
+        date: reviewDate,
+        description: reviewDescription,
+        amount_cents: Number(reviewAmountCents),
+        category_id: null,
+        account_id: null,
+      };
+      await api.patch(`/imports/pending/${selectedPendingId}/confirm`, payload, {
+        headers: authHeaders,
+      });
+      setMessage("Pending row confirmed.");
+      setSelectedPendingId(null);
+      setReviewDate("");
+      setReviewDescription("");
+      setReviewAmountCents("");
+      await loadDashboardData();
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not confirm pending row.");
+    }
+  }
 
   async function uploadImport(e: FormEvent) {
     e.preventDefault();
@@ -248,6 +329,64 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
               </tbody>
             </table>
           </article>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head">
+            <h3>Pending review</h3>
+            <p>Rows that could not be parsed during import.</p>
+          </div>
+          <div className="review-form row">
+            <input
+              placeholder="YYYY-MM-DD"
+              value={reviewDate}
+              onChange={(e) => setReviewDate(e.target.value)}
+            />
+            <input
+              placeholder="Description"
+              value={reviewDescription}
+              onChange={(e) => setReviewDescription(e.target.value)}
+            />
+            <input
+              placeholder="Amount in cents (e.g. -4590)"
+              value={reviewAmountCents}
+              onChange={(e) => setReviewAmountCents(e.target.value)}
+            />
+            <button className="primary" type="button" onClick={() => void confirmPendingItem()}>
+              Confirm selected
+            </button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Import</th>
+                <th>Row</th>
+                <th>Error</th>
+                <th>Raw</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingItems.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>No pending rows.</td>
+                </tr>
+              ) : null}
+              {pendingItems.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.import_id}</td>
+                  <td>{item.row_number}</td>
+                  <td>{item.error}</td>
+                  <td className="raw-json">{item.raw_data}</td>
+                  <td>
+                    <button className="ghost" type="button" onClick={() => prefillFromPending(item)}>
+                      Select
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       </main>
     </div>
