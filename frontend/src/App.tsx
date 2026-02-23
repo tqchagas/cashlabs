@@ -73,5 +73,5 @@ export function App() {
     );
   }
 
-  return <Dashboard onLogout={logout} />;
+  return <Dashboard token={token} apiBaseUrl={apiBaseUrl} onLogout={logout} />;
 }

@@ -135,6 +135,21 @@
   justify-content: flex-end;
 }
 
+.import-box {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--surface);
+}
+
+.notice {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
 .summary-grid,
 .cta-grid {
   display: grid;
