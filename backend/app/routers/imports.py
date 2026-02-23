@@ -9,6 +9,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Category, ImportJob, ImportReviewItem, Transaction, User
 from ..schemas import PendingReviewResolveIn
+from ..services.ai_categorization import suggest_category_name
 from .. import utils
 from ..utils import add_months, build_dedupe_hash, map_row, parse_csv, parse_xlsx
 
@@ -79,20 +80,53 @@ async def import_tabular(
     duplicates = 0
     pending = 0
     notes: list[str] = []
+    suggestion_cache: dict[str, str | None] = {}
+
+    existing_categories = db.query(Category).filter(Category.user_id == user.id).all()
+    category_id_by_name = {cat.name.lower(): cat.id for cat in existing_categories}
+    category_names = [cat.name for cat in existing_categories]
+
+    def resolve_or_create_category_id(name: str | None) -> int | None:
+        if not name:
+            return None
+        normalized = " ".join(name.strip().split())
+        if not normalized:
+            return None
+        cached_id = category_id_by_name.get(normalized.lower())
+        if cached_id:
+            return cached_id
+
+        existing = (
+            db.query(Category)
+            .filter(Category.user_id == user.id, Category.name.ilike(normalized))
+            .first()
+        )
+        if existing:
+            category_id_by_name[existing.name.lower()] = existing.id
+            if existing.name not in category_names:
+                category_names.append(existing.name)
+            return existing.id
+
+        created = Category(user_id=user.id, name=normalized)
+        db.add(created)
+        db.flush()
+        category_id_by_name[created.name.lower()] = created.id
+        category_names.append(created.name)
+        return created.id
 
     for idx, row in enumerate(rows, start=1):
         try:
             normalized = map_row(row, mapping)
             cat_name = normalized.get("category")
-            category_id = None
-            if cat_name:
-                category = (
-                    db.query(Category)
-                    .filter(Category.user_id == user.id, Category.name.ilike(cat_name))
-                    .first()
-                )
-                if category:
-                    category_id = category.id
+            if not cat_name and normalized["amount_cents"] < 0:
+                desc_key = normalized["description"].lower()
+                if desc_key not in suggestion_cache:
+                    suggestion_cache[desc_key] = suggest_category_name(
+                        normalized["description"], normalized["amount_cents"], category_names
+                    )
+                cat_name = suggestion_cache[desc_key]
+
+            category_id = resolve_or_create_category_id(cat_name)
 
             installment = extract_installment_info_safe(normalized["description"])
             if installment:

@@ -1,6 +1,7 @@
 from io import BytesIO
 
 import openpyxl
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -139,3 +140,33 @@ def test_csv_import_generates_installments_from_description(client: TestClient, 
     assert any("Reservatorio De Do (10/12)" in d for d in descriptions)
     assert any("Reservatorio De Do (11/12)" in d for d in descriptions)
     assert any("Reservatorio De Do (12/12)" in d for d in descriptions)
+
+
+def test_csv_import_auto_categorizes_expense_with_ai(
+    client: TestClient, user_token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    headers = {"Authorization": f"Bearer {user_token}"}
+
+    def fake_suggest(description: str, amount_cents: int, existing_categories: list[str] | None = None) -> str | None:
+        return "Restaurante"
+
+    monkeypatch.setattr("app.routers.imports.suggest_category_name", fake_suggest)
+
+    content = "Data,Descricao,Valor\n2026-02-01,Almoco shopping,-42.90\n"
+    resp = client.post(
+        "/imports/tabular",
+        headers=headers,
+        files={"file": ("ai_cat.csv", content, "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 1
+
+    categories = client.get("/categories", headers=headers)
+    assert categories.status_code == 200
+    names = [c["name"] for c in categories.json()]
+    assert "Restaurante" in names
+
+    txs = client.get("/transactions?query=Almoco", headers=headers)
+    assert txs.status_code == 200
+    assert len(txs.json()) == 1
+    assert txs.json()[0]["category_id"] is not None
