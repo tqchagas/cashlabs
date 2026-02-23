@@ -426,6 +426,11 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
       setMessage("Invalid amount.");
       return;
     }
+    const currentTx = transactions.find((item) => item.id === editingTxId);
+    if (!currentTx) {
+      setMessage("Transaction not found.");
+      return;
+    }
     try {
       await api.patch(
         `/transactions/${editingTxId}`,
@@ -433,8 +438,8 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
           date: editDate,
           description: editDescription,
           amount_cents: amountCents,
-          category_id: null,
-          account_id: null,
+          category_id: currentTx.category_id,
+          account_id: currentTx.account_id,
         },
         { headers: authHeaders }
       );
