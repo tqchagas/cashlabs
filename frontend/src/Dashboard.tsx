@@ -27,7 +27,11 @@ const transactions = [
   ["Shopify", "Business", "$29.00", "3 days ago"],
 ];
 
-export function Dashboard() {
+type DashboardProps = {
+  onLogout?: () => void;
+};
+
+export function Dashboard({ onLogout }: DashboardProps) {
   return (
     <div className="financy-page">
       <header className="financy-header">
@@ -48,6 +52,9 @@ export function Dashboard() {
         <div className="financy-actions">
           <button className="ghost">Search</button>
           <button className="ghost">Bell</button>
+          <button className="ghost" onClick={onLogout}>
+            Logout
+          </button>
           <div className="avatar">TC</div>
         </div>
       </header>
