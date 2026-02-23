@@ -12,6 +12,10 @@ import openpyxl
 
 
 DATE_FORMATS = ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%d.%m.%Y"]
+INSTALLMENT_PATTERNS = [
+    re.compile(r"\(?\s*parcela\s*(\d{1,2})\s*de\s*(\d{1,2})\s*\)?", re.IGNORECASE),
+    re.compile(r"\(\s*(\d{1,2})\s*/\s*(\d{1,2})\s*\)", re.IGNORECASE),
+]
 
 
 def normalize_date(value: str) -> str:
@@ -188,3 +192,22 @@ def map_row(row: dict, mapping: dict | None = None) -> dict:
         "amount_cents": parse_amount_to_cents(row.get(value_key, "0")),
         "category": normalize_description(str(row.get(category_key, ""))) if category_key else None,
     }
+
+
+def extract_installment_info(description: str) -> dict | None:
+    text = normalize_description(description)
+    for pattern in INSTALLMENT_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        current = int(match.group(1))
+        total = int(match.group(2))
+        if total <= 1 or current < 1 or current > total:
+            return None
+        base = normalize_description(pattern.sub("", text)).strip(" -/")
+        return {
+            "base_description": base or text,
+            "current": current,
+            "total": total,
+        }
+    return None

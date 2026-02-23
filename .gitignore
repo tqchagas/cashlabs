@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+
+# Node
+node_modules/
+
+# Build artifacts
+frontend/dist/
+
+# Vercel
+.vercel/
