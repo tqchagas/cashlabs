@@ -1,5 +1,18 @@
 import axios from "axios";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  ArcElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Filler,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Tooltip,
+  type ChartOptions,
+} from "chart.js";
+import { Doughnut, Line } from "react-chartjs-2";
 
 type Transaction = {
   id: number;
@@ -11,16 +24,6 @@ type Transaction = {
   account_id: number | null;
   source: string;
   installment_group_id?: number | null;
-};
-
-type CategoryTotal = {
-  category: string;
-  total_cents: number;
-};
-
-type InstallmentsSummary = {
-  scope: "this_month" | "next_month" | "total" | string;
-  total_cents: number;
 };
 
 type PendingReviewItem = {
@@ -53,10 +56,11 @@ type DashboardProps = {
 
 const colors = ["#0f766e", "#0ea5e9", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#84cc16"];
 
-type PieSlice = {
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
+
+type LinePoint = {
   label: string;
   value: number;
-  color: string;
 };
 
 function centsToCurrency(value: number): string {
@@ -75,68 +79,41 @@ function amountInputToCents(value: string): number | null {
   return Math.round(parsed * 100);
 }
 
-function percent(part: number, total: number): string {
-  if (total <= 0) return "0.00%";
-  return `${((Math.abs(part) / total) * 100).toFixed(2)}%`;
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 
-function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number): { x: number; y: number } {
-  const rad = ((angleDeg - 90) * Math.PI) / 180.0;
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+function addMonths(d: Date, months: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + months, 1);
 }
 
-function donutArcPath(cx: number, cy: number, rOuter: number, rInner: number, startDeg: number, endDeg: number): string {
-  const startOuter = polarToCartesian(cx, cy, rOuter, endDeg);
-  const endOuter = polarToCartesian(cx, cy, rOuter, startDeg);
-  const startInner = polarToCartesian(cx, cy, rInner, endDeg);
-  const endInner = polarToCartesian(cx, cy, rInner, startDeg);
-  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
-  return [
-    `M ${startOuter.x} ${startOuter.y}`,
-    `A ${rOuter} ${rOuter} 0 ${largeArc} 0 ${endOuter.x} ${endOuter.y}`,
-    `L ${endInner.x} ${endInner.y}`,
-    `A ${rInner} ${rInner} 0 ${largeArc} 1 ${startInner.x} ${startInner.y}`,
-    "Z",
-  ].join(" ");
-}
-
-function PieDonut({ title, slices }: { title: string; slices: PieSlice[] }) {
-  const valid = slices.filter((slice) => slice.value > 0);
-  const total = valid.reduce((acc, slice) => acc + slice.value, 0);
-  let current = 0;
+function ExpensesLineChart({
+  data,
+  options,
+}: {
+  data: {
+    labels: string[];
+    datasets: Array<{
+      label: string;
+      data: number[];
+      borderColor: string;
+      backgroundColor: string;
+      tension: number;
+      fill: boolean;
+      pointRadius: number;
+      pointHoverRadius: number;
+    }>;
+  };
+  options: ChartOptions<"line">;
+}) {
   return (
-    <article className="panel">
-      <h3>{title}</h3>
-      <div className="pie-wrap">
-        <svg viewBox="0 0 240 240" className="pie-svg" role="img" aria-label={title}>
-          <circle cx={120} cy={120} r={110} fill="#e2e8f0" />
-          {valid.map((slice, index) => {
-            const start = current;
-            const size = (slice.value / total) * 360;
-            const end = start + size;
-            current = end;
-            const path = donutArcPath(120, 120, 110, 60, start, end);
-            return (
-              <path key={`${slice.label}-${index}`} d={path} fill={slice.color}>
-                <title>
-                  {slice.label}: {centsToCurrency(slice.value)} ({percent(slice.value, total)})
-                </title>
-              </path>
-            );
-          })}
-          <circle cx={120} cy={120} r={55} fill="#fff" />
-        </svg>
+    <article className="panel wide">
+      <div className="panel-head">
+        <h3>Expenses trend (-3 to +3 months)</h3>
       </div>
-      <ul className="legend-list">
-        {valid.length === 0 ? <li>No expense categories yet.</li> : null}
-        {valid.map((slice, idx) => (
-          <li key={`${slice.label}-${idx}`}>
-            <span className="legend-dot" style={{ backgroundColor: slice.color }} />
-            <span>{slice.label}</span>
-            <strong>{percent(slice.value, total)}</strong>
-          </li>
-        ))}
-      </ul>
+      <div className="chart-canvas-wrap line">
+        <Line data={data} options={options} />
+      </div>
     </article>
   );
 }
@@ -155,8 +132,6 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState("");
-  const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([]);
-  const [categoryTotalsTotal, setCategoryTotalsTotal] = useState<CategoryTotal[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [editingTxId, setEditingTxId] = useState<number | null>(null);
   const [editDate, setEditDate] = useState("");
@@ -189,32 +164,131 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [file, setFile] = useState<File | null>(null);
   const [filePassword, setFilePassword] = useState("");
   const [expenseScope, setExpenseScope] = useState<"this_month" | "next_month" | "total">("this_month");
+  const [categoryChartScope, setCategoryChartScope] = useState<"previous" | "current" | "next">("current");
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
+  const categoryPieData = useMemo(() => {
+    const today = new Date();
+    const current = startOfMonth(today);
+    const targetStart =
+      categoryChartScope === "previous"
+        ? addMonths(current, -1)
+        : categoryChartScope === "next"
+          ? addMonths(current, 1)
+          : current;
+    const targetEnd = addMonths(targetStart, 1);
 
-  const monthChartData = useMemo(() => {
-    const data = categoryTotals
-      .map((item, idx) => ({
-        label: item.category,
-        value: item.total_cents,
-        color: colors[idx % colors.length],
-      }))
-      .filter((item) => item.value > 0);
-    return data;
-  }, [categoryTotals]);
+    const byCategory = new Map<string, number>();
+    for (const tx of transactions) {
+      const d = new Date(`${tx.date}T00:00:00`);
+      if (d < targetStart || d >= targetEnd) continue;
+      const name = tx.category_name || "Sem categoria";
+      byCategory.set(name, (byCategory.get(name) || 0) + tx.amount_cents);
+    }
 
-  const totalChartData = useMemo(() => {
-    const data = categoryTotalsTotal
-      .map((item, idx) => ({
-        label: item.category,
-        value: item.total_cents,
-        color: colors[idx % colors.length],
-      }))
-      .filter((item) => item.value > 0);
-    return data;
-  }, [categoryTotalsTotal]);
+    const labels = Array.from(byCategory.keys());
+    const values = labels.map((label) => byCategory.get(label) || 0);
+    return {
+      labels,
+      values,
+      total: values.reduce((acc, value) => acc + value, 0),
+    };
+  }, [transactions, categoryChartScope]);
+
+  const categoryChartData = useMemo(
+    () => ({
+      labels: categoryPieData.labels,
+      datasets: [
+        {
+          data: categoryPieData.values,
+          backgroundColor: categoryPieData.labels.map((_, idx) => colors[idx % colors.length]),
+          borderWidth: 1,
+          borderColor: "#fff",
+        },
+      ],
+    }),
+    [categoryPieData]
+  );
+
+  const categoryChartOptions = useMemo<ChartOptions<"doughnut">>(
+    () => ({
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const value = Number(ctx.raw || 0);
+              const total = categoryPieData.total || 1;
+              const pct = ((value / total) * 100).toFixed(2);
+              return `${ctx.label}: ${centsToCurrency(value)} (${pct}%)`;
+            },
+          },
+        },
+      },
+      cutout: "58%",
+      maintainAspectRatio: false,
+    }),
+    [categoryPieData.total]
+  );
+
+  const linePoints = useMemo<LinePoint[]>(() => {
+    const today = new Date();
+    const current = startOfMonth(today);
+    return [-3, -2, -1, 0, 1, 2, 3].map((offset) => {
+      const start = addMonths(current, offset);
+      const end = addMonths(start, 1);
+      const value = transactions
+        .filter((tx) => {
+          const d = new Date(`${tx.date}T00:00:00`);
+          return d >= start && d < end;
+        })
+        .reduce((acc, tx) => acc + tx.amount_cents, 0);
+      return {
+        label: start.toLocaleDateString("pt-BR", { month: "short" }).replace(".", ""),
+        value,
+      };
+    });
+  }, [transactions]);
+
+  const lineData = useMemo(
+    () => ({
+      labels: linePoints.map((point) => point.label),
+      datasets: [
+        {
+          label: "Expenses",
+          data: linePoints.map((point) => point.value),
+          borderColor: "#0f766e",
+          backgroundColor: "rgba(15,118,110,0.12)",
+          tension: 0.35,
+          fill: true,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+        },
+      ],
+    }),
+    [linePoints]
+  );
+
+  const lineOptions = useMemo<ChartOptions<"line">>(
+    () => ({
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => centsToCurrency(Number(ctx.raw || 0)),
+          },
+        },
+      },
+      scales: {
+        y: {
+          ticks: {
+            callback: (value) => centsToCurrency(Number(value)),
+          },
+        },
+      },
+      maintainAspectRatio: false,
+    }),
+    []
+  );
 
   const categoryNameById = useMemo(
     () =>
@@ -224,7 +298,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     [categories]
   );
 
-  const latestTransactions = useMemo(() => transactions.slice(0, 5), [transactions]);
+  const latestTransactions = useMemo(() => transactions.slice(0, 20), [transactions]);
   const scopedExpensesCents = useMemo(() => {
     const today = new Date();
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -240,36 +314,16 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
       .reduce((acc, tx) => acc + tx.amount_cents, 0);
   }, [transactions, expenseScope]);
 
-  const scopedInstallmentExpensesCents = useMemo(() => {
-    const today = new Date();
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    const afterNextMonthStart = new Date(today.getFullYear(), today.getMonth() + 2, 1);
-    return transactions
-      .filter((tx) => tx.installment_group_id !== null && tx.installment_group_id !== undefined)
-      .filter((tx) => {
-        const d = new Date(`${tx.date}T00:00:00`);
-        if (expenseScope === "this_month") return d >= monthStart && d < nextMonthStart;
-        if (expenseScope === "next_month") return d >= nextMonthStart && d < afterNextMonthStart;
-        return d >= monthStart;
-      })
-      .reduce((acc, tx) => acc + tx.amount_cents, 0);
-  }, [transactions, expenseScope]);
-
   async function loadDashboardData() {
     setLoading(true);
     setMessage("");
     try {
-      const [categoriesRes, categoriesTotalRes, transactionsRes, pendingRes, categoryListRes, accountsRes] = await Promise.all([
-        api.get<CategoryTotal[]>(`/reports/by-category?year=${year}&month=${month}`, { headers: authHeaders }),
-        api.get<CategoryTotal[]>("/reports/by-category-total", { headers: authHeaders }),
+      const [transactionsRes, pendingRes, categoryListRes, accountsRes] = await Promise.all([
         api.get<Transaction[]>("/transactions", { headers: authHeaders }),
         api.get<PendingReviewItem[]>("/imports/pending", { headers: authHeaders }),
         api.get<Category[]>("/categories", { headers: authHeaders }),
         api.get<Account[]>("/accounts", { headers: authHeaders }),
       ]);
-      setCategoryTotals(categoriesRes.data);
-      setCategoryTotalsTotal(categoriesTotalRes.data);
       setTransactions(transactionsRes.data);
       setPendingItems(pendingRes.data);
       setCategories(categoryListRes.data);
@@ -782,30 +836,35 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
         </section>
 
         <section className="charts-grid">
-          <PieDonut title="Expenses by category (this month)" slices={monthChartData} />
-          <PieDonut title="Expenses by category (total)" slices={totalChartData} />
           <article className="panel">
-            <h3>Compras parceladas</h3>
-            <div className="installments-summary">
-              <select value={expenseScope} onChange={(e) => setExpenseScope(e.target.value as "this_month" | "next_month" | "total")}>
-                <option value="this_month">Este mês</option>
-                <option value="next_month">Próximo</option>
-                <option value="total">Total</option>
+            <div className="panel-head">
+              <h3>Expenses by category</h3>
+              <select
+                value={categoryChartScope}
+                onChange={(e) => setCategoryChartScope(e.target.value as "previous" | "current" | "next")}
+              >
+                <option value="previous">Mês anterior</option>
+                <option value="current">Este mês</option>
+                <option value="next">Próximo mês</option>
               </select>
-              <h2>{centsToCurrency(scopedInstallmentExpensesCents)}</h2>
+            </div>
+            <div className="chart-canvas-wrap">
+              <Doughnut data={categoryChartData} options={categoryChartOptions} />
             </div>
           </article>
+          <ExpensesLineChart data={lineData} options={lineOptions} />
         </section>
 
         <section className="content-grid">
           <article className="panel wide">
             <div className="panel-head">
               <h3>All transactions</h3>
-              <p>Latest 5 transactions. Use View all to open the full list.</p>
+              <p>Latest 20 transactions. Use View all to open the full list.</p>
               <button className="soft" type="button" onClick={onViewAllTransactions}>
                 View all
               </button>
             </div>
+            <div className="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -902,6 +961,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                 ))}
               </tbody>
             </table>
+            </div>
           </article>
         </section>
 
