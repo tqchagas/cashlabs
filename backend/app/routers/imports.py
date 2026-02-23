@@ -9,7 +9,8 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Category, ImportJob, ImportReviewItem, Transaction, User
 from ..schemas import PendingReviewResolveIn
-from ..utils import add_months, build_dedupe_hash, extract_installment_info, map_row, parse_csv, parse_xlsx
+from .. import utils
+from ..utils import add_months, build_dedupe_hash, map_row, parse_csv, parse_xlsx
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -36,6 +37,13 @@ def add_review_item(
             resolved_account_id=account_id,
         )
     )
+
+
+def extract_installment_info_safe(description: str) -> dict | None:
+    extractor = getattr(utils, "extract_installment_info", None)
+    if not callable(extractor):
+        return None
+    return extractor(description)
 
 
 @router.post("/tabular")
@@ -86,7 +94,7 @@ async def import_tabular(
                 if category:
                     category_id = category.id
 
-            installment = extract_installment_info(normalized["description"])
+            installment = extract_installment_info_safe(normalized["description"])
             if installment:
                 current = int(installment["current"])
                 total = int(installment["total"])
