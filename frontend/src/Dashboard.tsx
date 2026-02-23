@@ -35,6 +35,16 @@ type PendingReviewItem = {
   suggested_account_id: number | null;
 };
 
+type Category = {
+  id: number;
+  name: string;
+};
+
+type Account = {
+  id: number;
+  name: string;
+};
+
 type DashboardProps = {
   token: string;
   apiBaseUrl: string;
@@ -64,6 +74,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState("");
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
   const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([]);
@@ -73,6 +84,22 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
   const [editDescription, setEditDescription] = useState("");
   const [editAmountCents, setEditAmountCents] = useState("");
   const [pendingItems, setPendingItems] = useState<PendingReviewItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+
+  const [showManual, setShowManual] = useState(false);
+  const [manualMode, setManualMode] = useState<"single" | "installments">("single");
+  const [singleType, setSingleType] = useState<"expense" | "income">("expense");
+  const [manualDate, setManualDate] = useState("");
+  const [manualDescription, setManualDescription] = useState("");
+  const [manualAmountCents, setManualAmountCents] = useState("");
+  const [manualCategoryId, setManualCategoryId] = useState<string>("");
+  const [manualAccountId, setManualAccountId] = useState<string>("");
+  const [installmentsCount, setInstallmentsCount] = useState("2");
+  const [intervalMonths, setIntervalMonths] = useState("1");
+  const [installmentAmountMode, setInstallmentAmountMode] = useState<"total" | "per">("total");
+  const [totalCents, setTotalCents] = useState("");
+  const [amountPerInstallmentCents, setAmountPerInstallmentCents] = useState("");
   const [reviewDate, setReviewDate] = useState("");
   const [reviewDescription, setReviewDescription] = useState("");
   const [reviewAmountCents, setReviewAmountCents] = useState("");
@@ -86,20 +113,49 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
+  const chartData = useMemo(() => {
+    const data = categoryTotals
+      .map((item, idx) => ({
+        label: item.category,
+        value: Math.abs(item.total_cents),
+        color: colors[idx % colors.length],
+      }))
+      .filter((item) => item.value > 0);
+    const total = data.reduce((acc, item) => acc + item.value, 0);
+    return { data, total };
+  }, [categoryTotals]);
+
+  const pieChartStyle = useMemo(() => {
+    if (chartData.total <= 0) return undefined;
+    let current = 0;
+    const segments = chartData.data.map((item) => {
+      const start = current;
+      const size = (item.value / chartData.total) * 100;
+      const end = start + size;
+      current = end;
+      return `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+    });
+    return { background: `conic-gradient(${segments.join(", ")})` };
+  }, [chartData]);
+
   async function loadDashboardData() {
     setLoading(true);
     setMessage("");
     try {
-      const [summaryRes, categoriesRes, transactionsRes, pendingRes] = await Promise.all([
+      const [summaryRes, categoriesRes, transactionsRes, pendingRes, categoryListRes, accountsRes] = await Promise.all([
         api.get<MonthlySummary>(`/reports/monthly?year=${year}&month=${month}`, { headers: authHeaders }),
         api.get<CategoryTotal[]>(`/reports/by-category?year=${year}&month=${month}`, { headers: authHeaders }),
         api.get<Transaction[]>("/transactions", { headers: authHeaders }),
         api.get<PendingReviewItem[]>("/imports/pending", { headers: authHeaders }),
+        api.get<Category[]>("/categories", { headers: authHeaders }),
+        api.get<Account[]>("/accounts", { headers: authHeaders }),
       ]);
       setSummary(summaryRes.data);
       setCategoryTotals(categoriesRes.data);
       setTransactions(transactionsRes.data);
       setPendingItems(pendingRes.data);
+      setCategories(categoryListRes.data);
+      setAccounts(accountsRes.data);
       if (pendingRes.data.length > 0 && selectedPendingId === null) {
         prefillFromPending(pendingRes.data[0]);
       }
@@ -191,6 +247,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
     form.append("file", file);
     if (filePassword.trim()) form.append("password", filePassword.trim());
 
+    setImporting(true);
     try {
       const res = await api.post("/imports/tabular", form, {
         headers: { ...authHeaders, "Content-Type": "multipart/form-data" },
@@ -204,6 +261,107 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
       await loadDashboardData();
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || "Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function resetManualForm() {
+    setManualMode("single");
+    setSingleType("expense");
+    setManualDate("");
+    setManualDescription("");
+    setManualAmountCents("");
+    setManualCategoryId("");
+    setManualAccountId("");
+    setInstallmentsCount("2");
+    setIntervalMonths("1");
+    setInstallmentAmountMode("total");
+    setTotalCents("");
+    setAmountPerInstallmentCents("");
+  }
+
+  async function submitManualTransaction(e: FormEvent) {
+    e.preventDefault();
+    setMessage("");
+
+    if (!manualDate || !manualDescription) {
+      setMessage("Fill date and description.");
+      return;
+    }
+
+    const categoryId = manualCategoryId ? Number(manualCategoryId) : null;
+    const accountId = manualAccountId ? Number(manualAccountId) : null;
+
+    try {
+      if (manualMode === "single") {
+        if (!manualAmountCents) {
+          setMessage("Fill amount (in cents).");
+          return;
+        }
+        const absAmount = Math.abs(Number(manualAmountCents));
+        if (!Number.isFinite(absAmount) || absAmount <= 0) {
+          setMessage("Invalid amount.");
+          return;
+        }
+        const amount = singleType === "expense" ? -absAmount : absAmount;
+        await api.post(
+          "/transactions",
+          {
+            date: manualDate,
+            description: manualDescription,
+            amount_cents: amount,
+            category_id: categoryId,
+            account_id: accountId,
+          },
+          { headers: authHeaders }
+        );
+      } else {
+        const installments = Number(installmentsCount);
+        const interval = Number(intervalMonths);
+        if (!Number.isInteger(installments) || installments <= 1) {
+          setMessage("Installments must be at least 2.");
+          return;
+        }
+        if (!Number.isInteger(interval) || interval <= 0) {
+          setMessage("Interval in months must be greater than 0.");
+          return;
+        }
+
+        const payload: Record<string, unknown> = {
+          start_date: manualDate,
+          base_description: manualDescription,
+          installments,
+          interval_months: interval,
+          category_id: categoryId,
+          account_id: accountId,
+        };
+
+        if (installmentAmountMode === "total") {
+          const absTotal = Math.abs(Number(totalCents));
+          if (!Number.isFinite(absTotal) || absTotal <= 0) {
+            setMessage("Invalid total amount.");
+            return;
+          }
+          payload.total_cents = absTotal;
+        } else {
+          const absEach = Math.abs(Number(amountPerInstallmentCents));
+          if (!Number.isFinite(absEach) || absEach <= 0) {
+            setMessage("Invalid amount per installment.");
+            return;
+          }
+          payload.amount_per_installment_cents = absEach;
+        }
+
+        await api.post("/installments/groups", payload, { headers: authHeaders });
+      }
+
+      setMessage("Transaction created.");
+      resetManualForm();
+      setShowManual(false);
+      await loadDashboardData();
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not create transaction.");
     }
   }
 
@@ -258,7 +416,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
     }
   }
 
-  const totalExpenseAbs = Math.abs(summary?.total_expenses_cents || 0);
+  const totalExpenseAbs = chartData.total;
   const cards = [
     {
       label: "Balance",
@@ -308,29 +466,147 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
         <section className="financy-page-head">
           <h1>Welcome back. Here is your financial overview for this month.</h1>
           <div className="head-controls">
+            <button className="soft" onClick={() => setShowManual((v) => !v)}>
+              {showManual ? "Close manual entry" : "Add transaction"}
+            </button>
             <button className="primary" onClick={() => setShowImport((v) => !v)}>
               {showImport ? "Close import" : "Import CSV/XLSX"}
             </button>
           </div>
         </section>
 
+        {showManual ? (
+          <section className="manual-box">
+            <div className="panel-head">
+              <h3>Add transaction</h3>
+              <p>Create a single transaction or a new installment group.</p>
+            </div>
+            <form className="manual-form" onSubmit={submitManualTransaction}>
+              <select value={manualMode} onChange={(e) => setManualMode(e.target.value as "single" | "installments")}>
+                <option value="single">Single transaction</option>
+                <option value="installments">Installments</option>
+              </select>
+
+              <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} required />
+              <input
+                placeholder={manualMode === "single" ? "Description" : "Base description"}
+                value={manualDescription}
+                onChange={(e) => setManualDescription(e.target.value)}
+                required
+              />
+
+              {manualMode === "single" ? (
+                <>
+                  <select value={singleType} onChange={(e) => setSingleType(e.target.value as "expense" | "income")}>
+                    <option value="expense">Expense</option>
+                    <option value="income">Income</option>
+                  </select>
+                  <input
+                    placeholder="Amount in cents"
+                    value={manualAmountCents}
+                    onChange={(e) => setManualAmountCents(e.target.value)}
+                    required
+                  />
+                </>
+              ) : (
+                <>
+                  <input
+                    type="number"
+                    min={2}
+                    placeholder="Installments"
+                    value={installmentsCount}
+                    onChange={(e) => setInstallmentsCount(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="Interval (months)"
+                    value={intervalMonths}
+                    onChange={(e) => setIntervalMonths(e.target.value)}
+                    required
+                  />
+                  <select
+                    value={installmentAmountMode}
+                    onChange={(e) => setInstallmentAmountMode(e.target.value as "total" | "per")}
+                  >
+                    <option value="total">Use total amount</option>
+                    <option value="per">Use amount per installment</option>
+                  </select>
+                  {installmentAmountMode === "total" ? (
+                    <input
+                      placeholder="Total amount in cents"
+                      value={totalCents}
+                      onChange={(e) => setTotalCents(e.target.value)}
+                      required
+                    />
+                  ) : (
+                    <input
+                      placeholder="Amount per installment in cents"
+                      value={amountPerInstallmentCents}
+                      onChange={(e) => setAmountPerInstallmentCents(e.target.value)}
+                      required
+                    />
+                  )}
+                </>
+              )}
+
+              <select value={manualCategoryId} onChange={(e) => setManualCategoryId(e.target.value)}>
+                <option value="">No category</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+
+              <select value={manualAccountId} onChange={(e) => setManualAccountId(e.target.value)}>
+                <option value="">No account</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+
+              <button className="primary" type="submit">
+                Save transaction
+              </button>
+            </form>
+          </section>
+        ) : null}
+
         {showImport ? (
           <section className="import-box">
             <form className="row" onSubmit={uploadImport}>
-              <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} disabled={importing} />
               <input
                 type="password"
                 placeholder="XLSX password (optional)"
                 value={filePassword}
                 onChange={(e) => setFilePassword(e.target.value)}
+                disabled={importing}
               />
-              <button type="submit">Send import</button>
+              <button type="submit" disabled={importing}>
+                {importing ? "Importing..." : "Send import"}
+              </button>
             </form>
+            {importing ? (
+              <div className="loading-inline">
+                <span className="spinner" />
+                <span>Processing file...</span>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
         {message ? <p className="notice">{message}</p> : null}
-        {loading ? <p className="notice">Loading dashboard data...</p> : null}
+        {loading ? (
+          <div className="loading-inline notice">
+            <span className="spinner" />
+            <span>Loading dashboard data...</span>
+          </div>
+        ) : null}
 
         <section className="summary-grid">
           {cards.map((item) => (
@@ -348,7 +624,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
           <article className="panel">
             <h3>Expenses by category</h3>
             <div className="pie-wrap">
-              <div className="pie-chart" />
+              <div className="pie-chart" style={pieChartStyle} />
             </div>
             <ul className="legend-list">
               {categoryTotals.length === 0 ? <li>No expense categories yet.</li> : null}

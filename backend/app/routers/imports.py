@@ -9,7 +9,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Category, ImportJob, ImportReviewItem, Transaction, User
 from ..schemas import PendingReviewResolveIn
-from ..services.ai_categorization import suggest_category_name
+from ..services.ai_categorization import is_non_semantic_category_name, suggest_category_name
 from .. import utils
 from ..utils import add_months, build_dedupe_hash, map_row, parse_csv, parse_xlsx
 
@@ -118,6 +118,8 @@ async def import_tabular(
         try:
             normalized = map_row(row, mapping)
             cat_name = normalized.get("category")
+            if is_non_semantic_category_name(cat_name):
+                cat_name = None
             if not cat_name and normalized["amount_cents"] < 0:
                 desc_key = normalized["description"].lower()
                 if desc_key not in suggestion_cache:

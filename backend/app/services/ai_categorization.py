@@ -7,6 +7,9 @@ from functools import lru_cache
 from openai import OpenAI
 
 DEFAULT_CATEGORIES = [
+    "Supermercado",
+    "Alimentacao",
+    "Bar",
     "Mercado",
     "Restaurante",
     "Transporte",
@@ -18,6 +21,16 @@ DEFAULT_CATEGORIES = [
     "Educacao",
     "Outros",
 ]
+
+NON_SEMANTIC_STATEMENT_LABELS = {
+    "parcela sem juros",
+    "compra internacional",
+    "compra a vista",
+    "compra a vista parcelada",
+    "compra parcelada",
+    "credito rotativo",
+    "pagamento em atraso",
+}
 
 
 @lru_cache(maxsize=1)
@@ -31,6 +44,34 @@ def _client() -> OpenAI | None:
 def _normalize_choice(name: str) -> str:
     text = " ".join(name.strip().split())
     return text.title() if text else "Outros"
+
+
+def _normalize_key(text: str) -> str:
+    normalized = text.strip().lower()
+    replacements = {
+        "á": "a",
+        "à": "a",
+        "â": "a",
+        "ã": "a",
+        "é": "e",
+        "ê": "e",
+        "í": "i",
+        "ó": "o",
+        "ô": "o",
+        "õ": "o",
+        "ú": "u",
+        "ç": "c",
+    }
+    for src, dst in replacements.items():
+        normalized = normalized.replace(src, dst)
+    return " ".join(normalized.split())
+
+
+def is_non_semantic_category_name(name: str | None) -> bool:
+    if not name:
+        return False
+    normalized = _normalize_key(name)
+    return normalized in NON_SEMANTIC_STATEMENT_LABELS
 
 
 def suggest_category_name(description: str, amount_cents: int, existing_categories: list[str] | None = None) -> str | None:
