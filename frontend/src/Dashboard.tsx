@@ -59,6 +59,10 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
   const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [editingTxId, setEditingTxId] = useState<number | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editAmountCents, setEditAmountCents] = useState("");
   const [pendingItems, setPendingItems] = useState<PendingReviewItem[]>([]);
   const [reviewDate, setReviewDate] = useState("");
   const [reviewDescription, setReviewDescription] = useState("");
@@ -85,7 +89,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
       ]);
       setSummary(summaryRes.data);
       setCategoryTotals(categoriesRes.data);
-      setTransactions(transactionsRes.data.slice(0, 8));
+      setTransactions(transactionsRes.data);
       setPendingItems(pendingRes.data);
       if (pendingRes.data.length > 0 && selectedPendingId === null) {
         prefillFromPending(pendingRes.data[0]);
@@ -191,6 +195,57 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
       await loadDashboardData();
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || "Import failed.");
+    }
+  }
+
+  function startEditTransaction(tx: Transaction) {
+    setEditingTxId(tx.id);
+    setEditDate(tx.date);
+    setEditDescription(tx.description);
+    setEditAmountCents(String(tx.amount_cents));
+  }
+
+  function cancelEditTransaction() {
+    setEditingTxId(null);
+    setEditDate("");
+    setEditDescription("");
+    setEditAmountCents("");
+  }
+
+  async function saveTransactionEdit() {
+    if (!editingTxId) return;
+    if (!editDate || !editDescription || !editAmountCents) {
+      setMessage("Fill date, description and amount to update transaction.");
+      return;
+    }
+    try {
+      await api.patch(
+        `/transactions/${editingTxId}`,
+        {
+          date: editDate,
+          description: editDescription,
+          amount_cents: Number(editAmountCents),
+          category_id: null,
+          account_id: null,
+        },
+        { headers: authHeaders }
+      );
+      setMessage("Transaction updated.");
+      cancelEditTransaction();
+      await loadDashboardData();
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not update transaction.");
+    }
+  }
+
+  async function deleteTransaction(txId: number) {
+    try {
+      await api.delete(`/transactions/${txId}`, { headers: authHeaders });
+      setMessage("Transaction removed.");
+      if (editingTxId === txId) cancelEditTransaction();
+      await loadDashboardData();
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not remove transaction.");
     }
   }
 
@@ -300,8 +355,8 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
 
           <article className="panel wide">
             <div className="panel-head">
-              <h3>Last transactions</h3>
-              <p>Most recent records from your account.</p>
+              <h3>All transactions</h3>
+              <p>Complete transaction list. You can edit or remove any row.</p>
             </div>
             <table>
               <thead>
@@ -310,20 +365,64 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                   <th>Date</th>
                   <th>Amount</th>
                   <th>Source</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {transactions.length === 0 ? (
                   <tr>
-                    <td colSpan={4}>No transactions yet.</td>
+                    <td colSpan={5}>No transactions yet.</td>
                   </tr>
                 ) : null}
                 {transactions.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.description}</td>
-                    <td>{row.date}</td>
-                    <td>{centsToCurrency(row.amount_cents)}</td>
+                    <td>
+                      {editingTxId === row.id ? (
+                        <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                      ) : (
+                        row.description
+                      )}
+                    </td>
+                    <td>
+                      {editingTxId === row.id ? (
+                        <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />
+                      ) : (
+                        row.date
+                      )}
+                    </td>
+                    <td>
+                      {editingTxId === row.id ? (
+                        <input
+                          value={editAmountCents}
+                          onChange={(e) => setEditAmountCents(e.target.value)}
+                          placeholder="Amount in cents"
+                        />
+                      ) : (
+                        centsToCurrency(row.amount_cents)
+                      )}
+                    </td>
                     <td>{row.source}</td>
+                    <td className="table-actions">
+                      {editingTxId === row.id ? (
+                        <>
+                          <button className="primary" type="button" onClick={() => void saveTransactionEdit()}>
+                            Save
+                          </button>
+                          <button className="ghost" type="button" onClick={cancelEditTransaction}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="ghost" type="button" onClick={() => startEditTransaction(row)}>
+                            Edit
+                          </button>
+                          <button className="ghost" type="button" onClick={() => void deleteTransaction(row.id)}>
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
