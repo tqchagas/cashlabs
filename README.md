@@ -45,6 +45,27 @@ npm run dev
 
 Frontend em `http://localhost:5173`.
 
+## Deploy (GitHub + Vercel + Neon)
+
+Use dois projetos Vercel apontando para o mesmo repositório:
+
+1. `cashlabs-front`
+- Root Directory: `frontend`
+- Framework: Vite (auto detect)
+- Env: `VITE_API_BASE_URL=https://<url-do-backend>`
+
+2. `cashlabs-back`
+- Root Directory: `backend`
+- Runtime: Python (usando `backend/vercel.json`)
+- Env:
+  - `DATABASE_URL` (Neon)
+  - `SECRET_KEY`
+
+Arquivos de referência:
+- `frontend/.env.example`
+- `backend/.env.example`
+- `backend/vercel.json`
+
 ## Notas importantes
 
 - Valores monetários são armazenados como `amount_cents` assinado (`INTEGER`).
