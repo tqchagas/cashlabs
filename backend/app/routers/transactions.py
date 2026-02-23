@@ -22,6 +22,7 @@ def serialize_transaction(tx: Transaction) -> dict:
         "category_name": None,
         "account_id": tx.account_id,
         "source": tx.source,
+        "installment_group_id": tx.installment_group_id,
     }
 
 
@@ -74,7 +75,7 @@ def list_transactions(
     if category_ids:
         rows = (
             db.query(Category.id, Category.name)
-            .filter(Category.user_id == user.id, Category.id.in_(category_ids))
+            .filter(Category.id.in_(category_ids))
             .all()
         )
         category_name_by_id = {int(cat_id): cat_name for cat_id, cat_name in rows}

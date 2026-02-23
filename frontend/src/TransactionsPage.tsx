@@ -19,6 +19,11 @@ type TransactionsPageProps = {
   onLogout?: () => void;
 };
 
+type Category = {
+  id: number;
+  name: string;
+};
+
 function centsToCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
 }
@@ -49,17 +54,24 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [editingTxId, setEditingTxId] = useState<number | null>(null);
   const [editDate, setEditDate] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editAmountCents, setEditAmountCents] = useState("");
+  const [editCategoryId, setEditCategoryId] = useState<string>("");
+  const [newEditCategoryName, setNewEditCategoryName] = useState("");
 
   async function loadData() {
     setLoading(true);
     setMessage("");
     try {
-      const txRes = await api.get<Transaction[]>("/transactions", { headers: authHeaders });
+      const [txRes, categoriesRes] = await Promise.all([
+        api.get<Transaction[]>("/transactions", { headers: authHeaders }),
+        api.get<Category[]>("/categories", { headers: authHeaders }),
+      ]);
       setTransactions(txRes.data);
+      setCategories(categoriesRes.data);
     } catch (error: any) {
       if (error?.response?.status === 401 && onLogout) {
         onLogout();
@@ -80,6 +92,8 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
     setEditDate(tx.date);
     setEditDescription(tx.description);
     setEditAmountCents(centsToAmountInput(tx.amount_cents));
+    setEditCategoryId(tx.category_id ? String(tx.category_id) : "");
+    setNewEditCategoryName("");
   }
 
   function cancelEditTransaction() {
@@ -87,6 +101,28 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
     setEditDate("");
     setEditDescription("");
     setEditAmountCents("");
+    setEditCategoryId("");
+    setNewEditCategoryName("");
+  }
+
+  async function createCategoryForEdit() {
+    const name = newEditCategoryName.trim();
+    if (!name) {
+      setMessage("Type a category name.");
+      return;
+    }
+    try {
+      const res = await api.post<Category>("/categories", { name }, { headers: authHeaders });
+      setCategories((prev) => {
+        const exists = prev.some((cat) => cat.id === res.data.id);
+        return exists ? prev : [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setEditCategoryId(String(res.data.id));
+      setNewEditCategoryName("");
+      setMessage("Category created.");
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not create category.");
+    }
   }
 
   async function saveTransactionEdit() {
@@ -114,7 +150,7 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
           date: editDate,
           description: editDescription,
           amount_cents: amountCents,
-          category_id: currentTx.category_id,
+          category_id: editCategoryId ? Number(editCategoryId) : null,
           account_id: currentTx.account_id ?? null,
         },
         { headers: authHeaders }
@@ -202,7 +238,30 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
                       row.description
                     )}
                   </td>
-                  <td>{row.category_name || "-"}</td>
+                  <td>
+                    {editingTxId === row.id ? (
+                      <div className="edit-category-row">
+                        <select value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)}>
+                          <option value="">No category</option>
+                          {categories.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          placeholder="New category"
+                          value={newEditCategoryName}
+                          onChange={(e) => setNewEditCategoryName(e.target.value)}
+                        />
+                        <button type="button" className="soft" onClick={() => void createCategoryForEdit()}>
+                          Add
+                        </button>
+                      </div>
+                    ) : (
+                      row.category_name || "-"
+                    )}
+                  </td>
                   <td>
                     {editingTxId === row.id ? (
                       <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />

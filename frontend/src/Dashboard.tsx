@@ -10,18 +10,16 @@ type Transaction = {
   category_name?: string | null;
   account_id: number | null;
   source: string;
-};
-
-type MonthlySummary = {
-  year: number;
-  month: number;
-  total_expenses_cents: number;
-  total_income_cents: number;
-  balance_cents: number;
+  installment_group_id?: number | null;
 };
 
 type CategoryTotal = {
   category: string;
+  total_cents: number;
+};
+
+type InstallmentsSummary = {
+  scope: "this_month" | "next_month" | "total" | string;
   total_cents: number;
 };
 
@@ -55,6 +53,12 @@ type DashboardProps = {
 
 const colors = ["#0f766e", "#0ea5e9", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#84cc16"];
 
+type PieSlice = {
+  label: string;
+  value: number;
+  color: string;
+};
+
 function centsToCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
 }
@@ -76,6 +80,67 @@ function percent(part: number, total: number): string {
   return `${((Math.abs(part) / total) * 100).toFixed(2)}%`;
 }
 
+function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number): { x: number; y: number } {
+  const rad = ((angleDeg - 90) * Math.PI) / 180.0;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function donutArcPath(cx: number, cy: number, rOuter: number, rInner: number, startDeg: number, endDeg: number): string {
+  const startOuter = polarToCartesian(cx, cy, rOuter, endDeg);
+  const endOuter = polarToCartesian(cx, cy, rOuter, startDeg);
+  const startInner = polarToCartesian(cx, cy, rInner, endDeg);
+  const endInner = polarToCartesian(cx, cy, rInner, startDeg);
+  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
+  return [
+    `M ${startOuter.x} ${startOuter.y}`,
+    `A ${rOuter} ${rOuter} 0 ${largeArc} 0 ${endOuter.x} ${endOuter.y}`,
+    `L ${endInner.x} ${endInner.y}`,
+    `A ${rInner} ${rInner} 0 ${largeArc} 1 ${startInner.x} ${startInner.y}`,
+    "Z",
+  ].join(" ");
+}
+
+function PieDonut({ title, slices }: { title: string; slices: PieSlice[] }) {
+  const valid = slices.filter((slice) => slice.value > 0);
+  const total = valid.reduce((acc, slice) => acc + slice.value, 0);
+  let current = 0;
+  return (
+    <article className="panel">
+      <h3>{title}</h3>
+      <div className="pie-wrap">
+        <svg viewBox="0 0 240 240" className="pie-svg" role="img" aria-label={title}>
+          <circle cx={120} cy={120} r={110} fill="#e2e8f0" />
+          {valid.map((slice, index) => {
+            const start = current;
+            const size = (slice.value / total) * 360;
+            const end = start + size;
+            current = end;
+            const path = donutArcPath(120, 120, 110, 60, start, end);
+            return (
+              <path key={`${slice.label}-${index}`} d={path} fill={slice.color}>
+                <title>
+                  {slice.label}: {centsToCurrency(slice.value)} ({percent(slice.value, total)})
+                </title>
+              </path>
+            );
+          })}
+          <circle cx={120} cy={120} r={55} fill="#fff" />
+        </svg>
+      </div>
+      <ul className="legend-list">
+        {valid.length === 0 ? <li>No expense categories yet.</li> : null}
+        {valid.map((slice, idx) => (
+          <li key={`${slice.label}-${idx}`}>
+            <span className="legend-dot" style={{ backgroundColor: slice.color }} />
+            <span>{slice.label}</span>
+            <strong>{percent(slice.value, total)}</strong>
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
 function formatIsoDate(isoDate: string): string {
   if (!isoDate || isoDate.length < 10) return isoDate;
   const [year, month, day] = isoDate.slice(0, 10).split("-");
@@ -90,13 +155,15 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState("");
-  const [summary, setSummary] = useState<MonthlySummary | null>(null);
   const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([]);
+  const [categoryTotalsTotal, setCategoryTotalsTotal] = useState<CategoryTotal[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [editingTxId, setEditingTxId] = useState<number | null>(null);
   const [editDate, setEditDate] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editAmountCents, setEditAmountCents] = useState("");
+  const [editCategoryId, setEditCategoryId] = useState<string>("");
+  const [newEditCategoryName, setNewEditCategoryName] = useState("");
   const [pendingItems, setPendingItems] = useState<PendingReviewItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -121,35 +188,33 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [showImport, setShowImport] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [filePassword, setFilePassword] = useState("");
+  const [expenseScope, setExpenseScope] = useState<"this_month" | "next_month" | "total">("this_month");
 
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
-  const chartData = useMemo(() => {
+  const monthChartData = useMemo(() => {
     const data = categoryTotals
       .map((item, idx) => ({
         label: item.category,
-        value: Math.abs(item.total_cents),
+        value: item.total_cents,
         color: colors[idx % colors.length],
       }))
       .filter((item) => item.value > 0);
-    const total = data.reduce((acc, item) => acc + item.value, 0);
-    return { data, total };
+    return data;
   }, [categoryTotals]);
 
-  const pieChartStyle = useMemo(() => {
-    if (chartData.total <= 0) return undefined;
-    let current = 0;
-    const segments = chartData.data.map((item) => {
-      const start = current;
-      const size = (item.value / chartData.total) * 100;
-      const end = start + size;
-      current = end;
-      return `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
-    });
-    return { background: `conic-gradient(${segments.join(", ")})` };
-  }, [chartData]);
+  const totalChartData = useMemo(() => {
+    const data = categoryTotalsTotal
+      .map((item, idx) => ({
+        label: item.category,
+        value: item.total_cents,
+        color: colors[idx % colors.length],
+      }))
+      .filter((item) => item.value > 0);
+    return data;
+  }, [categoryTotalsTotal]);
 
   const categoryNameById = useMemo(
     () =>
@@ -160,21 +225,51 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   );
 
   const latestTransactions = useMemo(() => transactions.slice(0, 5), [transactions]);
+  const scopedExpensesCents = useMemo(() => {
+    const today = new Date();
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const afterNextMonthStart = new Date(today.getFullYear(), today.getMonth() + 2, 1);
+    return transactions
+      .filter((tx) => {
+        const d = new Date(`${tx.date}T00:00:00`);
+        if (expenseScope === "this_month") return d >= monthStart && d < nextMonthStart;
+        if (expenseScope === "next_month") return d >= nextMonthStart && d < afterNextMonthStart;
+        return d >= monthStart;
+      })
+      .reduce((acc, tx) => acc + tx.amount_cents, 0);
+  }, [transactions, expenseScope]);
+
+  const scopedInstallmentExpensesCents = useMemo(() => {
+    const today = new Date();
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const afterNextMonthStart = new Date(today.getFullYear(), today.getMonth() + 2, 1);
+    return transactions
+      .filter((tx) => tx.installment_group_id !== null && tx.installment_group_id !== undefined)
+      .filter((tx) => {
+        const d = new Date(`${tx.date}T00:00:00`);
+        if (expenseScope === "this_month") return d >= monthStart && d < nextMonthStart;
+        if (expenseScope === "next_month") return d >= nextMonthStart && d < afterNextMonthStart;
+        return d >= monthStart;
+      })
+      .reduce((acc, tx) => acc + tx.amount_cents, 0);
+  }, [transactions, expenseScope]);
 
   async function loadDashboardData() {
     setLoading(true);
     setMessage("");
     try {
-      const [summaryRes, categoriesRes, transactionsRes, pendingRes, categoryListRes, accountsRes] = await Promise.all([
-        api.get<MonthlySummary>(`/reports/monthly?year=${year}&month=${month}`, { headers: authHeaders }),
+      const [categoriesRes, categoriesTotalRes, transactionsRes, pendingRes, categoryListRes, accountsRes] = await Promise.all([
         api.get<CategoryTotal[]>(`/reports/by-category?year=${year}&month=${month}`, { headers: authHeaders }),
+        api.get<CategoryTotal[]>("/reports/by-category-total", { headers: authHeaders }),
         api.get<Transaction[]>("/transactions", { headers: authHeaders }),
         api.get<PendingReviewItem[]>("/imports/pending", { headers: authHeaders }),
         api.get<Category[]>("/categories", { headers: authHeaders }),
         api.get<Account[]>("/accounts", { headers: authHeaders }),
       ]);
-      setSummary(summaryRes.data);
       setCategoryTotals(categoriesRes.data);
+      setCategoryTotalsTotal(categoriesTotalRes.data);
       setTransactions(transactionsRes.data);
       setPendingItems(pendingRes.data);
       setCategories(categoryListRes.data);
@@ -406,6 +501,8 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     setEditDate(tx.date);
     setEditDescription(tx.description);
     setEditAmountCents(centsToAmountInput(tx.amount_cents));
+    setEditCategoryId(tx.category_id ? String(tx.category_id) : "");
+    setNewEditCategoryName("");
   }
 
   function cancelEditTransaction() {
@@ -413,6 +510,28 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     setEditDate("");
     setEditDescription("");
     setEditAmountCents("");
+    setEditCategoryId("");
+    setNewEditCategoryName("");
+  }
+
+  async function createCategoryForEdit() {
+    const name = newEditCategoryName.trim();
+    if (!name) {
+      setMessage("Type a category name.");
+      return;
+    }
+    try {
+      const res = await api.post<Category>("/categories", { name }, { headers: authHeaders });
+      setCategories((prev) => {
+        const exists = prev.some((cat) => cat.id === res.data.id);
+        return exists ? prev : [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setEditCategoryId(String(res.data.id));
+      setNewEditCategoryName("");
+      setMessage("Category created.");
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not create category.");
+    }
   }
 
   async function saveTransactionEdit() {
@@ -438,7 +557,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
           date: editDate,
           description: editDescription,
           amount_cents: amountCents,
-          category_id: currentTx.category_id,
+          category_id: editCategoryId ? Number(editCategoryId) : null,
           account_id: currentTx.account_id,
         },
         { headers: authHeaders }
@@ -462,12 +581,11 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     }
   }
 
-  const totalExpenseAbs = chartData.total;
   const cards = [
     {
       label: "Expenses",
-      value: centsToCurrency(summary?.total_expenses_cents || 0),
-      badge: "Month total",
+      value: centsToCurrency(scopedExpensesCents),
+      badge: expenseScope === "this_month" ? "Este mês" : expenseScope === "next_month" ? "Próximo" : "Total",
       tone: "negative",
     },
   ];
@@ -652,28 +770,34 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                 <h2>{item.value}</h2>
                 <span className={`badge ${item.tone}`}>{item.badge}</span>
               </div>
+              <div className="summary-select-wrap">
+                <select value={expenseScope} onChange={(e) => setExpenseScope(e.target.value as "this_month" | "next_month" | "total")}>
+                  <option value="this_month">Este mês</option>
+                  <option value="next_month">Próximo</option>
+                  <option value="total">Total</option>
+                </select>
+              </div>
             </article>
           ))}
         </section>
 
-        <section className="content-grid">
+        <section className="charts-grid">
+          <PieDonut title="Expenses by category (this month)" slices={monthChartData} />
+          <PieDonut title="Expenses by category (total)" slices={totalChartData} />
           <article className="panel">
-            <h3>Expenses by category</h3>
-            <div className="pie-wrap">
-              <div className="pie-chart" style={pieChartStyle} />
+            <h3>Compras parceladas</h3>
+            <div className="installments-summary">
+              <select value={expenseScope} onChange={(e) => setExpenseScope(e.target.value as "this_month" | "next_month" | "total")}>
+                <option value="this_month">Este mês</option>
+                <option value="next_month">Próximo</option>
+                <option value="total">Total</option>
+              </select>
+              <h2>{centsToCurrency(scopedInstallmentExpensesCents)}</h2>
             </div>
-            <ul className="legend-list">
-              {categoryTotals.length === 0 ? <li>No expense categories yet.</li> : null}
-              {categoryTotals.map((c, idx) => (
-                <li key={`${c.category}-${idx}`}>
-                  <span className="legend-dot" style={{ backgroundColor: colors[idx % colors.length] }} />
-                  <span>{c.category}</span>
-                  <strong>{percent(c.total_cents, totalExpenseAbs)}</strong>
-                </li>
-              ))}
-            </ul>
           </article>
+        </section>
 
+        <section className="content-grid">
           <article className="panel wide">
             <div className="panel-head">
               <h3>All transactions</h3>
@@ -708,7 +832,30 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                         row.description
                       )}
                     </td>
-                    <td>{row.category_name || (row.category_id ? categoryNameById.get(row.category_id) || "-" : "-")}</td>
+                    <td>
+                      {editingTxId === row.id ? (
+                        <div className="edit-category-row">
+                          <select value={editCategoryId} onChange={(e) => setEditCategoryId(e.target.value)}>
+                            <option value="">No category</option>
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            placeholder="New category"
+                            value={newEditCategoryName}
+                            onChange={(e) => setNewEditCategoryName(e.target.value)}
+                          />
+                          <button type="button" className="soft" onClick={() => void createCategoryForEdit()}>
+                            Add
+                          </button>
+                        </div>
+                      ) : (
+                        row.category_name || (row.category_id ? categoryNameById.get(row.category_id) || "-" : "-")
+                      )}
+                    </td>
                     <td>
                       {editingTxId === row.id ? (
                         <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />

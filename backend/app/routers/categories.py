@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -14,7 +15,14 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 
 @router.post("", status_code=201)
 def create_category(payload: CategoryIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    cat = Category(user_id=user.id, name=payload.name.strip())
+    name = " ".join(payload.name.strip().split())
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name is required")
+    existing = db.query(Category).filter(func.lower(Category.name) == name.lower()).first()
+    if existing:
+        return {"id": existing.id, "name": existing.name}
+
+    cat = Category(user_id=user.id, name=name)
     db.add(cat)
     try:
         db.commit()
@@ -26,5 +34,13 @@ def create_category(payload: CategoryIn, db: Session = Depends(get_db), user: Us
 
 @router.get("")
 def list_categories(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
-    cats = db.query(Category).filter(Category.user_id == user.id).order_by(Category.name).all()
-    return [{"id": c.id, "name": c.name} for c in cats]
+    cats = db.query(Category).order_by(Category.name.asc(), Category.id.asc()).all()
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for category in cats:
+        key = category.name.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append({"id": category.id, "name": category.name})
+    return deduped

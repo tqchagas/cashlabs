@@ -82,7 +82,7 @@ async def import_tabular(
     notes: list[str] = []
     suggestion_cache: dict[str, str | None] = {}
 
-    existing_categories = db.query(Category).filter(Category.user_id == user.id).all()
+    existing_categories = db.query(Category).all()
     category_id_by_name = {cat.name.lower(): cat.id for cat in existing_categories}
     category_names = [cat.name for cat in existing_categories]
 
@@ -98,7 +98,7 @@ async def import_tabular(
 
         existing = (
             db.query(Category)
-            .filter(Category.user_id == user.id, Category.name.ilike(normalized))
+            .filter(Category.name.ilike(normalized))
             .first()
         )
         if existing:
