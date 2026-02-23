@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import extract, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -13,10 +13,10 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 @router.get("/monthly")
 def monthly(year: int, month: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    month_prefix = f"{year:04d}-{month:02d}-%"
     q = db.query(Transaction).filter(
         Transaction.user_id == user.id,
-        extract("year", Transaction.date) == year,
-        extract("month", Transaction.date) == month,
+        Transaction.date.like(month_prefix),
     )
     total_expenses = q.filter(Transaction.amount_cents < 0).with_entities(func.coalesce(func.sum(Transaction.amount_cents), 0)).scalar() or 0
     total_income = q.filter(Transaction.amount_cents > 0).with_entities(func.coalesce(func.sum(Transaction.amount_cents), 0)).scalar() or 0
@@ -31,14 +31,14 @@ def monthly(year: int, month: int, db: Session = Depends(get_db), user: User = D
 
 @router.get("/by-category")
 def by_category(year: int, month: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    month_prefix = f"{year:04d}-{month:02d}-%"
     rows = (
         db.query(Category.name, func.sum(Transaction.amount_cents))
         .join(Category, Category.id == Transaction.category_id)
         .filter(
             Transaction.user_id == user.id,
             Transaction.amount_cents < 0,
-            extract("year", Transaction.date) == year,
-            extract("month", Transaction.date) == month,
+            Transaction.date.like(month_prefix),
         )
         .group_by(Category.name)
         .order_by(Category.name)
