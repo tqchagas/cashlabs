@@ -24,6 +24,7 @@ def create_group(payload: InstallmentGroupIn, db: Session = Depends(get_db), use
         total_cents = payload.amount_per_installment_cents * payload.installments
 
     assert total_cents is not None
+    total_cents = abs(total_cents)
     base_each = int(total_cents / payload.installments)
     remainder = total_cents - (base_each * payload.installments)
 
@@ -41,13 +42,13 @@ def create_group(payload: InstallmentGroupIn, db: Session = Depends(get_db), use
         amount = base_each + (remainder if i == payload.installments else 0)
         tx_date = add_months(payload.start_date, (i - 1) * payload.interval_months)
         desc = f"{payload.base_description.strip()} ({i}/{payload.installments})"
-        dedupe_hash = build_dedupe_hash(tx_date, desc, -abs(amount), str(payload.account_id or "none"))
+        dedupe_hash = build_dedupe_hash(tx_date, desc, abs(amount), str(payload.account_id or "none"))
         db.add(
             Transaction(
                 user_id=user.id,
                 date=tx_date,
                 description=desc,
-                amount_cents=-abs(amount),
+                amount_cents=abs(amount),
                 category_id=payload.category_id,
                 account_id=payload.account_id,
                 source="manual",

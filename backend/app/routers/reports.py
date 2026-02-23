@@ -18,14 +18,14 @@ def monthly(year: int, month: int, db: Session = Depends(get_db), user: User = D
         Transaction.user_id == user.id,
         Transaction.date.like(month_prefix),
     )
-    total_expenses = q.filter(Transaction.amount_cents < 0).with_entities(func.coalesce(func.sum(Transaction.amount_cents), 0)).scalar() or 0
-    total_income = q.filter(Transaction.amount_cents > 0).with_entities(func.coalesce(func.sum(Transaction.amount_cents), 0)).scalar() or 0
+    total_expenses = q.with_entities(func.coalesce(func.sum(Transaction.amount_cents), 0)).scalar() or 0
+    total_income = 0
     return {
         "year": year,
         "month": month,
         "total_expenses_cents": int(total_expenses),
         "total_income_cents": int(total_income),
-        "balance_cents": int(total_income) + int(total_expenses),
+        "balance_cents": int(total_income) - int(total_expenses),
     }
 
 
@@ -37,7 +37,7 @@ def by_category(year: int, month: int, db: Session = Depends(get_db), user: User
         .join(Category, Category.id == Transaction.category_id)
         .filter(
             Transaction.user_id == user.id,
-            Transaction.amount_cents < 0,
+            Transaction.amount_cents > 0,
             Transaction.date.like(month_prefix),
         )
         .group_by(Category.name)

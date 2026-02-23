@@ -27,13 +27,14 @@ def serialize_transaction(tx: Transaction) -> dict:
 
 @router.post("", status_code=201)
 def create_transaction(payload: TransactionIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    amount_cents = abs(payload.amount_cents)
     account_scope = str(payload.account_id or "none")
-    dedupe_hash = build_dedupe_hash(payload.date, payload.description, payload.amount_cents, account_scope)
+    dedupe_hash = build_dedupe_hash(payload.date, payload.description, amount_cents, account_scope)
     tx = Transaction(
         user_id=user.id,
         date=payload.date,
         description=normalize_description(payload.description),
-        amount_cents=payload.amount_cents,
+        amount_cents=amount_cents,
         category_id=payload.category_id,
         account_id=payload.account_id,
         source="manual",
@@ -99,7 +100,8 @@ def update_transaction(
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     normalized_description = normalize_description(payload.description)
-    new_hash = build_dedupe_hash(payload.date, normalized_description, payload.amount_cents, str(payload.account_id or "none"))
+    amount_cents = abs(payload.amount_cents)
+    new_hash = build_dedupe_hash(payload.date, normalized_description, amount_cents, str(payload.account_id or "none"))
     duplicate = (
         db.query(Transaction)
         .filter(
@@ -115,7 +117,7 @@ def update_transaction(
 
     tx.date = payload.date
     tx.description = normalized_description
-    tx.amount_cents = payload.amount_cents
+    tx.amount_cents = amount_cents
     tx.category_id = payload.category_id
     tx.account_id = payload.account_id
     tx.dedupe_hash = new_hash

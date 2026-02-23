@@ -59,6 +59,18 @@ function centsToCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
 }
 
+function centsToAmountInput(value: number): string {
+  return (value / 100).toFixed(2);
+}
+
+function amountInputToCents(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100);
+}
+
 function percent(part: number, total: number): string {
   if (total <= 0) return "0.00%";
   return `${((Math.abs(part) / total) * 100).toFixed(2)}%`;
@@ -93,14 +105,14 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [manualMode, setManualMode] = useState<"single" | "installments">("single");
   const [manualDate, setManualDate] = useState("");
   const [manualDescription, setManualDescription] = useState("");
-  const [manualAmountCents, setManualAmountCents] = useState("");
+  const [manualAmount, setManualAmount] = useState("");
   const [manualCategoryId, setManualCategoryId] = useState<string>("");
   const [manualAccountId, setManualAccountId] = useState<string>("");
   const [installmentsCount, setInstallmentsCount] = useState("2");
   const [intervalMonths, setIntervalMonths] = useState("1");
   const [installmentAmountMode, setInstallmentAmountMode] = useState<"total" | "per">("total");
-  const [totalCents, setTotalCents] = useState("");
-  const [amountPerInstallmentCents, setAmountPerInstallmentCents] = useState("");
+  const [totalAmount, setTotalAmount] = useState("");
+  const [amountPerInstallment, setAmountPerInstallment] = useState("");
   const [reviewDate, setReviewDate] = useState("");
   const [reviewDescription, setReviewDescription] = useState("");
   const [reviewAmountCents, setReviewAmountCents] = useState("");
@@ -281,14 +293,14 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     setManualMode("single");
     setManualDate("");
     setManualDescription("");
-    setManualAmountCents("");
+    setManualAmount("");
     setManualCategoryId("");
     setManualAccountId("");
     setInstallmentsCount("2");
     setIntervalMonths("1");
     setInstallmentAmountMode("total");
-    setTotalCents("");
-    setAmountPerInstallmentCents("");
+    setTotalAmount("");
+    setAmountPerInstallment("");
   }
 
   async function submitManualTransaction(e: FormEvent) {
@@ -305,12 +317,17 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
 
     try {
       if (manualMode === "single") {
-        if (!manualAmountCents) {
-          setMessage("Fill amount (in cents).");
+        if (!manualAmount) {
+          setMessage("Fill amount.");
           return;
         }
-        const absAmount = Math.abs(Number(manualAmountCents));
-        if (!Number.isFinite(absAmount) || absAmount <= 0) {
+        const amountCents = amountInputToCents(manualAmount);
+        if (amountCents === null) {
+          setMessage("Invalid amount.");
+          return;
+        }
+        const absAmount = Math.abs(amountCents);
+        if (absAmount <= 0) {
           setMessage("Invalid amount.");
           return;
         }
@@ -319,7 +336,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
           {
             date: manualDate,
             description: manualDescription,
-            amount_cents: -absAmount,
+            amount_cents: absAmount,
             category_id: categoryId,
             account_id: accountId,
           },
@@ -347,15 +364,25 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
         };
 
         if (installmentAmountMode === "total") {
-          const absTotal = Math.abs(Number(totalCents));
-          if (!Number.isFinite(absTotal) || absTotal <= 0) {
+          const totalCents = amountInputToCents(totalAmount);
+          if (totalCents === null) {
+            setMessage("Invalid total amount.");
+            return;
+          }
+          const absTotal = Math.abs(totalCents);
+          if (absTotal <= 0) {
             setMessage("Invalid total amount.");
             return;
           }
           payload.total_cents = absTotal;
         } else {
-          const absEach = Math.abs(Number(amountPerInstallmentCents));
-          if (!Number.isFinite(absEach) || absEach <= 0) {
+          const eachCents = amountInputToCents(amountPerInstallment);
+          if (eachCents === null) {
+            setMessage("Invalid amount per installment.");
+            return;
+          }
+          const absEach = Math.abs(eachCents);
+          if (absEach <= 0) {
             setMessage("Invalid amount per installment.");
             return;
           }
@@ -378,7 +405,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     setEditingTxId(tx.id);
     setEditDate(tx.date);
     setEditDescription(tx.description);
-    setEditAmountCents(String(tx.amount_cents));
+    setEditAmountCents(centsToAmountInput(tx.amount_cents));
   }
 
   function cancelEditTransaction() {
@@ -394,13 +421,18 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
       setMessage("Fill date, description and amount to update transaction.");
       return;
     }
+    const amountCents = amountInputToCents(editAmountCents);
+    if (amountCents === null) {
+      setMessage("Invalid amount.");
+      return;
+    }
     try {
       await api.patch(
         `/transactions/${editingTxId}`,
         {
           date: editDate,
           description: editDescription,
-          amount_cents: Number(editAmountCents),
+          amount_cents: amountCents,
           category_id: null,
           account_id: null,
         },
@@ -495,9 +527,11 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
               {manualMode === "single" ? (
                 <>
                   <input
-                    placeholder="Expense amount in cents"
-                    value={manualAmountCents}
-                    onChange={(e) => setManualAmountCents(e.target.value)}
+                    type="number"
+                    step="0.01"
+                    placeholder="Expense amount"
+                    value={manualAmount}
+                    onChange={(e) => setManualAmount(e.target.value)}
                     required
                   />
                 </>
@@ -528,16 +562,20 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                   </select>
                   {installmentAmountMode === "total" ? (
                     <input
-                      placeholder="Total amount in cents"
-                      value={totalCents}
-                      onChange={(e) => setTotalCents(e.target.value)}
+                      type="number"
+                      step="0.01"
+                      placeholder="Total amount"
+                      value={totalAmount}
+                      onChange={(e) => setTotalAmount(e.target.value)}
                       required
                     />
                   ) : (
                     <input
-                      placeholder="Amount per installment in cents"
-                      value={amountPerInstallmentCents}
-                      onChange={(e) => setAmountPerInstallmentCents(e.target.value)}
+                      type="number"
+                      step="0.01"
+                      placeholder="Amount per installment"
+                      value={amountPerInstallment}
+                      onChange={(e) => setAmountPerInstallment(e.target.value)}
                       required
                     />
                   )}
@@ -678,7 +716,9 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                         <input
                           value={editAmountCents}
                           onChange={(e) => setEditAmountCents(e.target.value)}
-                          placeholder="Amount in cents"
+                          type="number"
+                          step="0.01"
+                          placeholder="Amount"
                         />
                       ) : (
                         centsToCurrency(row.amount_cents)

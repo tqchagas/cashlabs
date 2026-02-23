@@ -117,15 +117,15 @@ async def import_tabular(
     for idx, row in enumerate(rows, start=1):
         try:
             normalized = map_row(row, mapping)
+            normalized_amount = abs(int(normalized["amount_cents"]))
             cat_name = normalized.get("category")
-            if normalized["amount_cents"] < 0:
-                desc_key = normalized["description"].lower()
-                if desc_key not in suggestion_cache:
-                    suggestion_cache[desc_key] = suggest_category_name(
-                        normalized["description"], normalized["amount_cents"], category_names
-                    )
-                cat_name = suggestion_cache[desc_key] or "Outros"
-            elif is_non_semantic_category_name(cat_name):
+            desc_key = normalized["description"].lower()
+            if desc_key not in suggestion_cache:
+                suggestion_cache[desc_key] = suggest_category_name(
+                    normalized["description"], normalized_amount, category_names
+                )
+            cat_name = suggestion_cache[desc_key] or "Outros"
+            if is_non_semantic_category_name(cat_name):
                 cat_name = None
 
             category_id = resolve_or_create_category_id(cat_name)
@@ -146,7 +146,7 @@ async def import_tabular(
                     tx_hash = build_dedupe_hash(
                         tx_date,
                         tx_description,
-                        normalized["amount_cents"],
+                        normalized_amount,
                         str(account_id or "none"),
                     )
                     existing = (
@@ -169,7 +169,7 @@ async def import_tabular(
                                 **row,
                                 "_generated_date": tx_date,
                                 "_generated_description": tx_description,
-                                "_generated_amount_cents": normalized["amount_cents"],
+                                "_generated_amount_cents": normalized_amount,
                             },
                             error="duplicate",
                             status="duplicate",
@@ -181,7 +181,7 @@ async def import_tabular(
                         user_id=user.id,
                         date=tx_date,
                         description=tx_description,
-                        amount_cents=normalized["amount_cents"],
+                        amount_cents=normalized_amount,
                         category_id=category_id,
                         account_id=account_id,
                         source=source_type,
@@ -195,7 +195,7 @@ async def import_tabular(
                     inserted += 1
             else:
                 dedupe_hash = build_dedupe_hash(
-                    normalized["date"], normalized["description"], normalized["amount_cents"], str(account_id or "none")
+                    normalized["date"], normalized["description"], normalized_amount, str(account_id or "none")
                 )
                 existing = (
                     db.query(Transaction)
@@ -224,7 +224,7 @@ async def import_tabular(
                     user_id=user.id,
                     date=normalized["date"],
                     description=normalized["description"],
-                    amount_cents=normalized["amount_cents"],
+                    amount_cents=normalized_amount,
                     category_id=category_id,
                     account_id=account_id,
                     source=source_type,
@@ -290,6 +290,7 @@ def confirm_pending_row(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
+    normalized_amount = abs(int(payload.amount_cents))
     item = (
         db.query(ImportReviewItem)
         .filter(
@@ -303,7 +304,7 @@ def confirm_pending_row(
         raise HTTPException(status_code=404, detail="Pending review item not found")
 
     dedupe_hash = build_dedupe_hash(
-        payload.date, payload.description, payload.amount_cents, str(payload.account_id or item.resolved_account_id or "none")
+        payload.date, payload.description, normalized_amount, str(payload.account_id or item.resolved_account_id or "none")
     )
     existing = (
         db.query(Transaction)
@@ -323,7 +324,7 @@ def confirm_pending_row(
         user_id=user.id,
         date=payload.date,
         description=payload.description,
-        amount_cents=payload.amount_cents,
+        amount_cents=normalized_amount,
         category_id=payload.category_id,
         account_id=(payload.account_id or item.resolved_account_id),
         source="import_review",
@@ -334,7 +335,7 @@ def confirm_pending_row(
     item.status = "resolved"
     item.resolved_date = payload.date
     item.resolved_description = payload.description
-    item.resolved_amount_cents = payload.amount_cents
+    item.resolved_amount_cents = normalized_amount
     item.resolved_category_id = payload.category_id
     item.resolved_account_id = payload.account_id or item.resolved_account_id
     db.flush()

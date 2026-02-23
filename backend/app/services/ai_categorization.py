@@ -74,11 +74,34 @@ def is_non_semantic_category_name(name: str | None) -> bool:
     return normalized in NON_SEMANTIC_STATEMENT_LABELS
 
 
-def suggest_category_name(description: str, amount_cents: int, existing_categories: list[str] | None = None) -> str | None:
-    # Apply only to expenses (negative amounts)
-    if amount_cents >= 0:
+def _extract_category_from_output(raw_output: str, allowed: list[str]) -> str | None:
+    output = (raw_output or "").strip()
+    if not output:
         return None
 
+    parsed = None
+    try:
+        parsed = json.loads(output)
+    except Exception:
+        start = output.find("{")
+        end = output.rfind("}")
+        if start >= 0 and end > start:
+            parsed = json.loads(output[start : end + 1])
+
+    if not parsed or "category" not in parsed:
+        return None
+
+    suggested = _normalize_choice(str(parsed["category"]))
+    if suggested in allowed:
+        return suggested
+
+    for cat in allowed:
+        if cat.lower() == suggested.lower():
+            return cat
+    return "Outros"
+
+
+def suggest_category_name(description: str, amount_cents: int, existing_categories: list[str] | None = None) -> str | None:
     client = _client()
     if not client:
         return None
@@ -96,29 +119,32 @@ def suggest_category_name(description: str, amount_cents: int, existing_categori
 
     try:
         response = client.responses.create(model=model, input=prompt)
-        output = (response.output_text or "").strip()
-        if not output:
-            return None
-
-        parsed = None
-        try:
-            parsed = json.loads(output)
-        except Exception:
-            start = output.find("{")
-            end = output.rfind("}")
-            if start >= 0 and end > start:
-                parsed = json.loads(output[start : end + 1])
-
-        if not parsed or "category" not in parsed:
-            return None
-
-        suggested = _normalize_choice(str(parsed["category"]))
-        if suggested in allowed:
+        output = getattr(response, "output_text", "") or ""
+        suggested = _extract_category_from_output(output, allowed)
+        if suggested:
             return suggested
-
-        for cat in allowed:
-            if cat.lower() == suggested.lower():
-                return cat
-        return "Outros"
     except Exception:
-        return None
+        pass
+
+    # Fallback path for OpenAI-compatible providers that do not support responses API consistently.
+    try:
+        chat = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            temperature=0,
+        )
+        content = ""
+        if chat.choices and chat.choices[0].message:
+            content = chat.choices[0].message.content or ""
+        suggested = _extract_category_from_output(content, allowed)
+        if suggested:
+            return suggested
+    except Exception:
+        pass
+
+    return None

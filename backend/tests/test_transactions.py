@@ -12,7 +12,7 @@ def test_create_category_and_manual_transaction(client: TestClient, user_token: 
         json={
             "date": "2026-02-10",
             "description": "Compra no mercado",
-            "amount_cents": -4590,
+            "amount_cents": 4590,
             "category_id": category_id,
             "account_id": None,
         },
@@ -33,7 +33,7 @@ def test_update_and_delete_transaction(client: TestClient, user_token: str) -> N
         json={
             "date": "2026-02-11",
             "description": "Internet",
-            "amount_cents": -12990,
+            "amount_cents": 12990,
             "category_id": None,
             "account_id": None,
         },
@@ -47,7 +47,7 @@ def test_update_and_delete_transaction(client: TestClient, user_token: str) -> N
         json={
             "date": "2026-02-12",
             "description": "Internet Fibra",
-            "amount_cents": -13990,
+            "amount_cents": 13990,
             "category_id": None,
             "account_id": None,
         },
@@ -55,7 +55,7 @@ def test_update_and_delete_transaction(client: TestClient, user_token: str) -> N
     )
     assert updated.status_code == 200
     assert updated.json()["description"] == "Internet Fibra"
-    assert updated.json()["amount_cents"] == -13990
+    assert updated.json()["amount_cents"] == 13990
 
     deleted = client.delete(f"/transactions/{tx_id}", headers=headers)
     assert deleted.status_code == 200

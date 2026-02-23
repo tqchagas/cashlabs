@@ -8,6 +8,7 @@ type Transaction = {
   amount_cents: number;
   category_id: number | null;
   category_name?: string | null;
+  account_id?: number | null;
   source: string;
 };
 
@@ -20,6 +21,18 @@ type TransactionsPageProps = {
 
 function centsToCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
+}
+
+function centsToAmountInput(value: number): string {
+  return (value / 100).toFixed(2);
+}
+
+function amountInputToCents(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100);
 }
 
 function formatIsoDate(isoDate: string): string {
@@ -36,6 +49,10 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [editingTxId, setEditingTxId] = useState<number | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editAmountCents, setEditAmountCents] = useState("");
 
   async function loadData() {
     setLoading(true);
@@ -57,6 +74,69 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
   useEffect(() => {
     void loadData();
   }, []);
+
+  function startEditTransaction(tx: Transaction) {
+    setEditingTxId(tx.id);
+    setEditDate(tx.date);
+    setEditDescription(tx.description);
+    setEditAmountCents(centsToAmountInput(tx.amount_cents));
+  }
+
+  function cancelEditTransaction() {
+    setEditingTxId(null);
+    setEditDate("");
+    setEditDescription("");
+    setEditAmountCents("");
+  }
+
+  async function saveTransactionEdit() {
+    if (!editingTxId) return;
+    if (!editDate || !editDescription || !editAmountCents) {
+      setMessage("Fill date, description and amount.");
+      return;
+    }
+    const amountCents = amountInputToCents(editAmountCents);
+    if (amountCents === null) {
+      setMessage("Invalid amount.");
+      return;
+    }
+
+    const currentTx = transactions.find((item) => item.id === editingTxId);
+    if (!currentTx) {
+      setMessage("Transaction not found.");
+      return;
+    }
+
+    try {
+      await api.patch(
+        `/transactions/${editingTxId}`,
+        {
+          date: editDate,
+          description: editDescription,
+          amount_cents: amountCents,
+          category_id: currentTx.category_id,
+          account_id: currentTx.account_id ?? null,
+        },
+        { headers: authHeaders }
+      );
+      setMessage("Transaction updated.");
+      cancelEditTransaction();
+      await loadData();
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not update transaction.");
+    }
+  }
+
+  async function deleteTransaction(txId: number) {
+    try {
+      await api.delete(`/transactions/${txId}`, { headers: authHeaders });
+      setMessage("Transaction removed.");
+      if (editingTxId === txId) cancelEditTransaction();
+      await loadData();
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || "Could not remove transaction.");
+    }
+  }
 
   return (
     <div className="financy-page">
@@ -104,21 +184,67 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
                 <th>Date</th>
                 <th>Amount</th>
                 <th>Source</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No transactions yet.</td>
+                  <td colSpan={6}>No transactions yet.</td>
                 </tr>
               ) : null}
               {transactions.map((row) => (
                 <tr key={row.id}>
-                  <td>{row.description}</td>
+                  <td>
+                    {editingTxId === row.id ? (
+                      <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                    ) : (
+                      row.description
+                    )}
+                  </td>
                   <td>{row.category_name || "-"}</td>
-                  <td>{formatIsoDate(row.date)}</td>
-                  <td>{centsToCurrency(row.amount_cents)}</td>
+                  <td>
+                    {editingTxId === row.id ? (
+                      <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />
+                    ) : (
+                      formatIsoDate(row.date)
+                    )}
+                  </td>
+                  <td>
+                    {editingTxId === row.id ? (
+                      <input
+                        value={editAmountCents}
+                        onChange={(e) => setEditAmountCents(e.target.value)}
+                        type="number"
+                        step="0.01"
+                        placeholder="Amount"
+                      />
+                    ) : (
+                      centsToCurrency(row.amount_cents)
+                    )}
+                  </td>
                   <td>{row.source}</td>
+                  <td className="table-actions">
+                    {editingTxId === row.id ? (
+                      <>
+                        <button className="primary" type="button" onClick={() => void saveTransactionEdit()}>
+                          Save
+                        </button>
+                        <button className="ghost" type="button" onClick={cancelEditTransaction}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="ghost action-edit" type="button" onClick={() => startEditTransaction(row)}>
+                          Edit
+                        </button>
+                        <button className="ghost action-delete" type="button" onClick={() => void deleteTransaction(row.id)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

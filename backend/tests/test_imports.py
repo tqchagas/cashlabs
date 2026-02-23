@@ -113,7 +113,7 @@ def test_csv_import_with_alternative_headers(client: TestClient, user_token: str
     txs = client.get("/transactions", headers=headers)
     assert txs.status_code == 200
     values = sorted([tx["amount_cents"] for tx in txs.json()])
-    assert values == [-4590, 500000]
+    assert values == [4590, 500000]
 
 
 def test_csv_import_generates_installments_from_description(client: TestClient, user_token: str) -> None:
