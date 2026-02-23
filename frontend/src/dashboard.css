@@ -161,6 +161,15 @@
   text-overflow: ellipsis;
 }
 
+.duplicate-flag {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid #fecaca;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .summary-grid,
 .cta-grid {
   display: grid;

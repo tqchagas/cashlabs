@@ -30,6 +30,8 @@ type PendingReviewItem = {
   row_number: number;
   raw_data: string;
   error: string;
+  status: "pending" | "duplicate" | string;
+  is_duplicate: boolean;
   suggested_account_id: number | null;
 };
 
@@ -461,6 +463,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                 <th>Import</th>
                 <th>Row</th>
                 <th>Error</th>
+                <th>Status</th>
                 <th>Raw</th>
                 <th>Action</th>
               </tr>
@@ -468,7 +471,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
             <tbody>
               {pendingItems.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No pending rows.</td>
+                  <td colSpan={6}>No pending rows.</td>
                 </tr>
               ) : null}
               {pendingItems.map((item) => (
@@ -476,11 +479,16 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                   <td>{item.import_id}</td>
                   <td>{item.row_number}</td>
                   <td>{item.error}</td>
+                  <td>{item.status}</td>
                   <td className="raw-json">{item.raw_data}</td>
                   <td>
-                    <button className="ghost" type="button" onClick={() => prefillFromPending(item)}>
-                      Select
-                    </button>
+                    {item.status === "pending" ? (
+                      <button className="ghost" type="button" onClick={() => prefillFromPending(item)}>
+                        Select
+                      </button>
+                    ) : (
+                      <span className="duplicate-flag">Duplicate</span>
+                    )}
                   </td>
                 </tr>
               ))}

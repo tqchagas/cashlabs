@@ -24,6 +24,12 @@ def test_csv_import_idempotent(client: TestClient, user_token: str) -> None:
     )
     assert r2.status_code == 200
     assert r2.json()["inserted"] == 0
+    assert r2.json()["duplicates"] == 2
+
+    pending = client.get("/imports/pending", headers=headers)
+    assert pending.status_code == 200
+    dupes = [row for row in pending.json() if row.get("status") == "duplicate"]
+    assert len(dupes) >= 2
 
 
 def test_xlsx_import_without_password(client: TestClient, user_token: str) -> None:
@@ -107,3 +113,29 @@ def test_csv_import_with_alternative_headers(client: TestClient, user_token: str
     assert txs.status_code == 200
     values = sorted([tx["amount_cents"] for tx in txs.json()])
     assert values == [-4590, 500000]
+
+
+def test_csv_import_generates_installments_from_description(client: TestClient, user_token: str) -> None:
+    headers = {"Authorization": f"Bearer {user_token}"}
+    content = (
+        "Data,Descricao,Valor\n"
+        "2026-02-10,CP PARC SHOPPING INTER (Parcela 01 de 04),-100.00\n"
+        "2026-02-10,Reservatorio De Do (10/12),-50.00\n"
+    )
+
+    resp = client.post(
+        "/imports/tabular",
+        headers=headers,
+        files={"file": ("installments.csv", content, "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 7  # 4 rows from first + 3 rows from second
+
+    txs = client.get("/transactions", headers=headers)
+    assert txs.status_code == 200
+    descriptions = [tx["description"] for tx in txs.json()]
+    assert any("CP PARC SHOPPING INTER (1/4)" in d for d in descriptions)
+    assert any("CP PARC SHOPPING INTER (4/4)" in d for d in descriptions)
+    assert any("Reservatorio De Do (10/12)" in d for d in descriptions)
+    assert any("Reservatorio De Do (11/12)" in d for d in descriptions)
+    assert any("Reservatorio De Do (12/12)" in d for d in descriptions)

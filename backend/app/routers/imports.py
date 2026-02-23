@@ -9,9 +9,33 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Category, ImportJob, ImportReviewItem, Transaction, User
 from ..schemas import PendingReviewResolveIn
-from ..utils import build_dedupe_hash, map_row, parse_csv, parse_xlsx
+from ..utils import add_months, build_dedupe_hash, extract_installment_info, map_row, parse_csv, parse_xlsx
 
 router = APIRouter(prefix="/imports", tags=["imports"])
+
+
+def add_review_item(
+    *,
+    db: Session,
+    import_id: int,
+    user_id: int,
+    row_number: int,
+    raw_data: dict,
+    error: str,
+    status: str,
+    account_id: int | None,
+) -> None:
+    db.add(
+        ImportReviewItem(
+            import_id=import_id,
+            user_id=user_id,
+            row_number=row_number,
+            raw_data=json.dumps(raw_data, ensure_ascii=False, default=str),
+            error=error,
+            status=status,
+            resolved_account_id=account_id,
+        )
+    )
 
 
 @router.post("/tabular")
@@ -62,50 +86,123 @@ async def import_tabular(
                 if category:
                     category_id = category.id
 
-            dedupe_hash = build_dedupe_hash(
-                normalized["date"], normalized["description"], normalized["amount_cents"], str(account_id or "none")
-            )
-            existing = (
-                db.query(Transaction)
-                .filter(
-                    Transaction.user_id == user.id,
-                    Transaction.account_id == account_id,
-                    Transaction.dedupe_hash == dedupe_hash,
-                )
-                .first()
-            )
-            if existing:
-                duplicates += 1
-                continue
+            installment = extract_installment_info(normalized["description"])
+            if installment:
+                current = int(installment["current"])
+                total = int(installment["total"])
+                base_description = str(installment["base_description"])
 
-            tx = Transaction(
-                user_id=user.id,
-                date=normalized["date"],
-                description=normalized["description"],
-                amount_cents=normalized["amount_cents"],
-                category_id=category_id,
-                account_id=account_id,
-                source=source_type,
-                import_id=import_job.id,
-                dedupe_hash=dedupe_hash,
-            )
-            db.add(tx)
-            db.flush()
-            inserted += 1
+                # Business rule:
+                # - create from current installment up to total
+                #   e.g. (1/4) -> 1..4, (10/12) -> 10..12
+                numbers = range(current, total + 1)
+                for number in numbers:
+                    tx_date = add_months(normalized["date"], number - current)
+                    tx_description = f"{base_description} ({number}/{total})"
+                    tx_hash = build_dedupe_hash(
+                        tx_date,
+                        tx_description,
+                        normalized["amount_cents"],
+                        str(account_id or "none"),
+                    )
+                    existing = (
+                        db.query(Transaction)
+                        .filter(
+                            Transaction.user_id == user.id,
+                            Transaction.account_id == account_id,
+                            Transaction.dedupe_hash == tx_hash,
+                        )
+                        .first()
+                    )
+                    if existing:
+                        duplicates += 1
+                        add_review_item(
+                            db=db,
+                            import_id=import_job.id,
+                            user_id=user.id,
+                            row_number=idx,
+                            raw_data={
+                                **row,
+                                "_generated_date": tx_date,
+                                "_generated_description": tx_description,
+                                "_generated_amount_cents": normalized["amount_cents"],
+                            },
+                            error="duplicate",
+                            status="duplicate",
+                            account_id=account_id,
+                        )
+                        continue
+
+                    tx = Transaction(
+                        user_id=user.id,
+                        date=tx_date,
+                        description=tx_description,
+                        amount_cents=normalized["amount_cents"],
+                        category_id=category_id,
+                        account_id=account_id,
+                        source=source_type,
+                        import_id=import_job.id,
+                        dedupe_hash=tx_hash,
+                        installment_number=number,
+                        installment_total=total,
+                    )
+                    db.add(tx)
+                    db.flush()
+                    inserted += 1
+            else:
+                dedupe_hash = build_dedupe_hash(
+                    normalized["date"], normalized["description"], normalized["amount_cents"], str(account_id or "none")
+                )
+                existing = (
+                    db.query(Transaction)
+                    .filter(
+                        Transaction.user_id == user.id,
+                        Transaction.account_id == account_id,
+                        Transaction.dedupe_hash == dedupe_hash,
+                    )
+                    .first()
+                )
+                if existing:
+                    duplicates += 1
+                    add_review_item(
+                        db=db,
+                        import_id=import_job.id,
+                        user_id=user.id,
+                        row_number=idx,
+                        raw_data=row,
+                        error="duplicate",
+                        status="duplicate",
+                        account_id=account_id,
+                    )
+                    continue
+
+                tx = Transaction(
+                    user_id=user.id,
+                    date=normalized["date"],
+                    description=normalized["description"],
+                    amount_cents=normalized["amount_cents"],
+                    category_id=category_id,
+                    account_id=account_id,
+                    source=source_type,
+                    import_id=import_job.id,
+                    dedupe_hash=dedupe_hash,
+                )
+                db.add(tx)
+                db.flush()
+                inserted += 1
         except Exception as exc:  # noqa: BLE001
             pending += 1
             error_message = str(exc)
             notes.append(f"row {idx}: {error_message}")
-            db.add(
-                ImportReviewItem(
-                    import_id=import_job.id,
-                    user_id=user.id,
-                    row_number=idx,
-                    raw_data=json.dumps(row, ensure_ascii=False, default=str),
-                    error=error_message,
-                    status="pending",
-                    resolved_account_id=account_id,
-                )
+            add_review_item(
+                db=db,
+                import_id=import_job.id,
+                user_id=user.id,
+                row_number=idx,
+                raw_data=row,
+                error=error_message,
+                status="pending",
+                account_id=account_id,
             )
 
     if pending > 0 and inserted == 0:
@@ -123,7 +220,7 @@ async def import_tabular(
 def list_pending_import_rows(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
     rows = (
         db.query(ImportReviewItem)
-        .filter(ImportReviewItem.user_id == user.id, ImportReviewItem.status == "pending")
+        .filter(ImportReviewItem.user_id == user.id, ImportReviewItem.status.in_(["pending", "duplicate"]))
         .order_by(ImportReviewItem.id.asc())
         .all()
     )
@@ -134,6 +231,8 @@ def list_pending_import_rows(db: Session = Depends(get_db), user: User = Depends
             "row_number": row.row_number,
             "raw_data": row.raw_data,
             "error": row.error,
+            "status": row.status,
+            "is_duplicate": row.status == "duplicate",
             "suggested_account_id": row.resolved_account_id,
         }
         for row in rows
