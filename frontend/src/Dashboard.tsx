@@ -44,12 +44,19 @@ type DashboardProps = {
 const colors = ["#0f766e", "#0ea5e9", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#84cc16"];
 
 function centsToCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value / 100);
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
 }
 
 function percent(part: number, total: number): string {
   if (total <= 0) return "0.00%";
   return `${((Math.abs(part) / total) * 100).toFixed(2)}%`;
+}
+
+function formatIsoDate(isoDate: string): string {
+  if (!isoDate || isoDate.length < 10) return isoDate;
+  const [year, month, day] = isoDate.slice(0, 10).split("-");
+  if (!year || !month || !day) return isoDate;
+  return `${day}/${month}/${year}`;
 }
 
 export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
@@ -389,7 +396,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                       {editingTxId === row.id ? (
                         <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />
                       ) : (
-                        row.date
+                        formatIsoDate(row.date)
                       )}
                     </td>
                     <td>
