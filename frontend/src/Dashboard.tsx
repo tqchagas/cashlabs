@@ -47,6 +47,9 @@ type Account = {
   name: string;
 };
 
+type TransactionSortBy = "date" | "description" | "amount_cents" | "source";
+type SortOrder = "asc" | "desc";
+
 type DashboardProps = {
   token: string;
   apiBaseUrl: string;
@@ -139,6 +142,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [editAmountCents, setEditAmountCents] = useState("");
   const [editCategoryId, setEditCategoryId] = useState<string>("");
   const [newEditCategoryName, setNewEditCategoryName] = useState("");
+  const [deletingTxId, setDeletingTxId] = useState<number | null>(null);
   const [pendingItems, setPendingItems] = useState<PendingReviewItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -165,6 +169,8 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const [filePassword, setFilePassword] = useState("");
   const [expenseScope, setExpenseScope] = useState<"this_month" | "next_month" | "total">("this_month");
   const [categoryChartScope, setCategoryChartScope] = useState<"previous" | "current" | "next">("current");
+  const [sortBy, setSortBy] = useState<TransactionSortBy>("date");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
   const categoryPieData = useMemo(() => {
     const today = new Date();
@@ -319,7 +325,10 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
     setMessage("");
     try {
       const [transactionsRes, pendingRes, categoryListRes, accountsRes] = await Promise.all([
-        api.get<Transaction[]>("/transactions", { headers: authHeaders }),
+        api.get<Transaction[]>("/transactions", {
+          headers: authHeaders,
+          params: { sort_by: sortBy, sort_order: sortOrder },
+        }),
         api.get<PendingReviewItem[]>("/imports/pending", { headers: authHeaders }),
         api.get<Category[]>("/categories", { headers: authHeaders }),
         api.get<Account[]>("/accounts", { headers: authHeaders }),
@@ -344,7 +353,21 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
 
   useEffect(() => {
     void loadDashboardData();
-  }, []);
+  }, [sortBy, sortOrder]);
+
+  function handleSort(column: TransactionSortBy) {
+    if (sortBy === column) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(column);
+    setSortOrder("asc");
+  }
+
+  function sortIndicator(column: TransactionSortBy): string {
+    if (sortBy !== column) return "";
+    return sortOrder === "asc" ? "▲" : "▼";
+  }
 
   function prefillFromPending(item: PendingReviewItem) {
     setSelectedPendingId(item.id);
@@ -625,6 +648,11 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   }
 
   async function deleteTransaction(txId: number) {
+    if (deletingTxId !== null) return;
+    const confirmed = window.confirm("Delete this transaction?");
+    if (!confirmed) return;
+
+    setDeletingTxId(txId);
     try {
       await api.delete(`/transactions/${txId}`, { headers: authHeaders });
       setMessage("Transaction removed.");
@@ -632,6 +660,8 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
       await loadDashboardData();
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || "Could not remove transaction.");
+    } finally {
+      setDeletingTxId(null);
     }
   }
 
@@ -645,7 +675,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   ];
 
   return (
-    <div className="financy-page">
+    <div className={`financy-page${deletingTxId !== null ? " page-busy" : ""}`}>
       <header className="financy-header">
         <div className="financy-brand">
           <div className="brand-dot">F</div>
@@ -868,11 +898,27 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
             <table>
               <thead>
                 <tr>
-                  <th>Description</th>
+                  <th>
+                    <button className="sort-header" type="button" onClick={() => handleSort("description")}>
+                      Description {sortIndicator("description")}
+                    </button>
+                  </th>
                   <th>Category</th>
-                  <th>Date</th>
-                  <th>Amount</th>
-                  <th>Source</th>
+                  <th>
+                    <button className="sort-header" type="button" onClick={() => handleSort("date")}>
+                      Date {sortIndicator("date")}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="sort-header" type="button" onClick={() => handleSort("amount_cents")}>
+                      Amount {sortIndicator("amount_cents")}
+                    </button>
+                  </th>
+                  <th>
+                    <button className="sort-header" type="button" onClick={() => handleSort("source")}>
+                      Source {sortIndicator("source")}
+                    </button>
+                  </th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -951,8 +997,13 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                           <button className="ghost action-edit" type="button" onClick={() => startEditTransaction(row)}>
                             Edit
                           </button>
-                          <button className="ghost action-delete" type="button" onClick={() => void deleteTransaction(row.id)}>
-                            Delete
+                          <button
+                            className="ghost action-delete"
+                            type="button"
+                            onClick={() => void deleteTransaction(row.id)}
+                            disabled={deletingTxId !== null}
+                          >
+                            {deletingTxId === row.id ? "Deleting..." : "Delete"}
                           </button>
                         </>
                       )}
@@ -1029,6 +1080,14 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
           </table>
         </section>
       </main>
+      {deletingTxId !== null ? (
+        <div className="page-lock-overlay" role="status" aria-live="polite" aria-label="Deleting transaction">
+          <div className="page-lock-content">
+            <span className="spinner" />
+            <span>Deleting transaction...</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

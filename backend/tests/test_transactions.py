@@ -64,3 +64,23 @@ def test_update_and_delete_transaction(client: TestClient, user_token: str) -> N
     lst = client.get("/transactions?query=Internet Fibra", headers=headers)
     assert lst.status_code == 200
     assert len(lst.json()) == 0
+
+
+def test_list_transactions_with_sorting(client: TestClient, user_token: str) -> None:
+    headers = {"Authorization": f"Bearer {user_token}"}
+    payloads = [
+        {"date": "2026-02-01", "description": "B expense", "amount_cents": 2000, "category_id": None, "account_id": None},
+        {"date": "2026-02-03", "description": "A expense", "amount_cents": 1000, "category_id": None, "account_id": None},
+        {"date": "2026-02-02", "description": "C expense", "amount_cents": 3000, "category_id": None, "account_id": None},
+    ]
+    for payload in payloads:
+        created = client.post("/transactions", json=payload, headers=headers)
+        assert created.status_code == 201
+
+    by_date_asc = client.get("/transactions?sort_by=date&sort_order=asc", headers=headers)
+    assert by_date_asc.status_code == 200
+    assert [row["date"] for row in by_date_asc.json()[:3]] == ["2026-02-01", "2026-02-02", "2026-02-03"]
+
+    by_amount_desc = client.get("/transactions?sort_by=amount_cents&sort_order=desc", headers=headers)
+    assert by_amount_desc.status_code == 200
+    assert [row["amount_cents"] for row in by_amount_desc.json()[:3]] == [3000, 2000, 1000]

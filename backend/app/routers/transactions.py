@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import asc, desc
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -54,6 +57,8 @@ def list_transactions(
     category_id: int | None = None,
     query: str | None = Query(default=None),
     account_id: int | None = None,
+    sort_by: Literal["date", "description", "amount_cents", "source", "created_at", "updated_at", "id"] = "date",
+    sort_order: Literal["asc", "desc"] = "desc",
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
@@ -69,7 +74,18 @@ def list_transactions(
     if query:
         q = q.filter(Transaction.description.ilike(f"%{query}%"))
 
-    txs = q.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
+    sort_columns = {
+        "id": Transaction.id,
+        "date": Transaction.date,
+        "description": Transaction.description,
+        "amount_cents": Transaction.amount_cents,
+        "source": Transaction.source,
+        "created_at": Transaction.created_at,
+        "updated_at": Transaction.updated_at,
+    }
+    order_column = sort_columns[sort_by]
+    order_fn = asc if sort_order == "asc" else desc
+    txs = q.order_by(order_fn(order_column), desc(Transaction.id)).all()
     category_ids = [tx.category_id for tx in txs if tx.category_id is not None]
     category_name_by_id: dict[int, str] = {}
     if category_ids:
