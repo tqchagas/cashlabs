@@ -196,3 +196,29 @@ def test_csv_import_ignores_statement_labels_and_uses_ai_category(
     names = [c["name"] for c in categories.json()]
     assert "Supermercado" in names
     assert "Compra à vista" not in names
+
+
+def test_csv_import_ignores_even_valid_file_category_for_expense_and_prefers_ai(
+    client: TestClient, user_token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    headers = {"Authorization": f"Bearer {user_token}"}
+
+    def fake_suggest(description: str, amount_cents: int, existing_categories: list[str] | None = None) -> str | None:
+        return "Transporte"
+
+    monkeypatch.setattr("app.routers.imports.suggest_category_name", fake_suggest)
+
+    content = "Data,Descricao,Valor,Categoria\n2026-02-01,Uber Centro,-35.00,Restaurante\n"
+    resp = client.post(
+        "/imports/tabular",
+        headers=headers,
+        files={"file": ("ai_cat_force_expense.csv", content, "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 1
+
+    categories = client.get("/categories", headers=headers)
+    assert categories.status_code == 200
+    names = [c["name"] for c in categories.json()]
+    assert "Transporte" in names
+    assert "Restaurante" not in names

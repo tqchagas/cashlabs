@@ -118,15 +118,15 @@ async def import_tabular(
         try:
             normalized = map_row(row, mapping)
             cat_name = normalized.get("category")
-            if is_non_semantic_category_name(cat_name):
-                cat_name = None
-            if not cat_name and normalized["amount_cents"] < 0:
+            if normalized["amount_cents"] < 0:
                 desc_key = normalized["description"].lower()
                 if desc_key not in suggestion_cache:
                     suggestion_cache[desc_key] = suggest_category_name(
                         normalized["description"], normalized["amount_cents"], category_names
                     )
-                cat_name = suggestion_cache[desc_key]
+                cat_name = suggestion_cache[desc_key] or "Outros"
+            elif is_non_semantic_category_name(cat_name):
+                cat_name = None
 
             category_id = resolve_or_create_category_id(cat_name)
 

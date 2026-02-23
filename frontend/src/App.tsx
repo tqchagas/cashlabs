@@ -1,6 +1,7 @@
 import axios from "axios";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Dashboard } from "./Dashboard";
+import { TransactionsPage } from "./TransactionsPage";
 import "./dashboard.css";
 import "./styles.css";
 
@@ -11,6 +12,17 @@ export function App() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [token, setToken] = useState(() => localStorage.getItem("cashlab_token") || "");
+  const [page, setPage] = useState<"dashboard" | "transactions">(
+    () => (window.location.hash === "#/transactions" ? "transactions" : "dashboard")
+  );
+
+  useEffect(() => {
+    function onHashChange() {
+      setPage(window.location.hash === "#/transactions" ? "transactions" : "dashboard");
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   async function login(e: FormEvent) {
     e.preventDefault();
@@ -28,6 +40,8 @@ export function App() {
   function logout() {
     localStorage.removeItem("cashlab_token");
     setToken("");
+    window.location.hash = "#/";
+    setPage("dashboard");
   }
 
   async function registerFromButton() {
@@ -73,5 +87,29 @@ export function App() {
     );
   }
 
-  return <Dashboard token={token} apiBaseUrl={apiBaseUrl} onLogout={logout} />;
+  if (page === "transactions") {
+    return (
+      <TransactionsPage
+        token={token}
+        apiBaseUrl={apiBaseUrl}
+        onLogout={logout}
+        onBack={() => {
+          window.location.hash = "#/";
+          setPage("dashboard");
+        }}
+      />
+    );
+  }
+
+  return (
+    <Dashboard
+      token={token}
+      apiBaseUrl={apiBaseUrl}
+      onLogout={logout}
+      onViewAllTransactions={() => {
+        window.location.hash = "#/transactions";
+        setPage("transactions");
+      }}
+    />
+  );
 }

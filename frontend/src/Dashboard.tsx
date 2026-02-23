@@ -49,6 +49,7 @@ type DashboardProps = {
   token: string;
   apiBaseUrl: string;
   onLogout?: () => void;
+  onViewAllTransactions?: () => void;
 };
 
 const colors = ["#0f766e", "#0ea5e9", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#84cc16"];
@@ -69,7 +70,7 @@ function formatIsoDate(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
-export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
+export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }: DashboardProps) {
   const api = useMemo(() => axios.create({ baseURL: apiBaseUrl }), [apiBaseUrl]);
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -89,7 +90,6 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
 
   const [showManual, setShowManual] = useState(false);
   const [manualMode, setManualMode] = useState<"single" | "installments">("single");
-  const [singleType, setSingleType] = useState<"expense" | "income">("expense");
   const [manualDate, setManualDate] = useState("");
   const [manualDescription, setManualDescription] = useState("");
   const [manualAmountCents, setManualAmountCents] = useState("");
@@ -137,6 +137,16 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
     });
     return { background: `conic-gradient(${segments.join(", ")})` };
   }, [chartData]);
+
+  const categoryNameById = useMemo(
+    () =>
+      new Map<number, string>(
+        categories.map((category) => [category.id, category.name])
+      ),
+    [categories]
+  );
+
+  const latestTransactions = useMemo(() => transactions.slice(0, 5), [transactions]);
 
   async function loadDashboardData() {
     setLoading(true);
@@ -268,7 +278,6 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
 
   function resetManualForm() {
     setManualMode("single");
-    setSingleType("expense");
     setManualDate("");
     setManualDescription("");
     setManualAmountCents("");
@@ -304,13 +313,12 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
           setMessage("Invalid amount.");
           return;
         }
-        const amount = singleType === "expense" ? -absAmount : absAmount;
         await api.post(
           "/transactions",
           {
             date: manualDate,
             description: manualDescription,
-            amount_cents: amount,
+            amount_cents: -absAmount,
             category_id: categoryId,
             account_id: accountId,
           },
@@ -497,12 +505,8 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
 
               {manualMode === "single" ? (
                 <>
-                  <select value={singleType} onChange={(e) => setSingleType(e.target.value as "expense" | "income")}>
-                    <option value="expense">Expense</option>
-                    <option value="income">Income</option>
-                  </select>
                   <input
-                    placeholder="Amount in cents"
+                    placeholder="Expense amount in cents"
                     value={manualAmountCents}
                     onChange={(e) => setManualAmountCents(e.target.value)}
                     required
@@ -641,12 +645,16 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
           <article className="panel wide">
             <div className="panel-head">
               <h3>All transactions</h3>
-              <p>Complete transaction list. You can edit or remove any row.</p>
+              <p>Latest 5 transactions. Use View all to open the full list.</p>
+              <button className="soft" type="button" onClick={onViewAllTransactions}>
+                View all
+              </button>
             </div>
             <table>
               <thead>
                 <tr>
                   <th>Description</th>
+                  <th>Category</th>
                   <th>Date</th>
                   <th>Amount</th>
                   <th>Source</th>
@@ -654,12 +662,12 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                 </tr>
               </thead>
               <tbody>
-                {transactions.length === 0 ? (
+                {latestTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>No transactions yet.</td>
+                    <td colSpan={6}>No transactions yet.</td>
                   </tr>
                 ) : null}
-                {transactions.map((row) => (
+                {latestTransactions.map((row) => (
                   <tr key={row.id}>
                     <td>
                       {editingTxId === row.id ? (
@@ -668,6 +676,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                         row.description
                       )}
                     </td>
+                    <td>{row.category_id ? categoryNameById.get(row.category_id) || "-" : "-"}</td>
                     <td>
                       {editingTxId === row.id ? (
                         <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />

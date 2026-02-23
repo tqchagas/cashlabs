@@ -89,6 +89,18 @@
   font-size: 14px;
 }
 
+.ghost {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.soft {
+  background: #e0f2f1;
+  border-color: #99f6e4;
+  color: #115e59;
+}
+
 .primary {
   border-color: var(--teal);
   background: var(--teal);
@@ -96,8 +108,8 @@
 }
 
 .financy-page .ghost:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: #e2e8f0;
+  border-color: #94a3b8;
   color: var(--ink);
 }
 
@@ -391,11 +403,16 @@
 .panel-head {
   padding: 24px;
   border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .panel-head p {
   margin: 6px 0 0;
   color: var(--muted);
+  width: 100%;
 }
 
 table {
