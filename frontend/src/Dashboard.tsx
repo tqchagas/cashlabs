@@ -287,10 +287,10 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
           <a className="active">Dashboard</a>
         </nav>
         <div className="financy-actions">
-          <button className="ghost" onClick={() => void loadDashboardData()}>
+          <button className="ghost action-neutral" onClick={() => void loadDashboardData()}>
             Refresh
           </button>
-          <button className="ghost" onClick={onLogout}>
+          <button className="ghost action-neutral" onClick={onLogout}>
             Logout
           </button>
           <div className="avatar">TC</div>
@@ -416,10 +416,10 @@ export function Dashboard({ token, apiBaseUrl, onLogout }: DashboardProps) {
                         </>
                       ) : (
                         <>
-                          <button className="ghost" type="button" onClick={() => startEditTransaction(row)}>
+                          <button className="ghost action-edit" type="button" onClick={() => startEditTransaction(row)}>
                             Edit
                           </button>
-                          <button className="ghost" type="button" onClick={() => void deleteTransaction(row.id)}>
+                          <button className="ghost action-delete" type="button" onClick={() => void deleteTransaction(row.id)}>
                             Delete
                           </button>
                         </>

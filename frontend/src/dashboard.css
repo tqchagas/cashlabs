@@ -95,6 +95,41 @@
   color: #fff;
 }
 
+.financy-page .ghost:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: var(--ink);
+}
+
+.action-neutral:hover {
+  background: #e2e8f0 !important;
+  border-color: #94a3b8 !important;
+}
+
+.action-edit {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.action-edit:hover {
+  color: #1e40af !important;
+  border-color: #60a5fa !important;
+  background: #dbeafe !important;
+}
+
+.action-delete {
+  color: #b91c1c;
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.action-delete:hover {
+  color: #991b1b !important;
+  border-color: #ef4444 !important;
+  background: #fee2e2 !important;
+}
+
 .avatar {
   width: 40px;
   height: 40px;
