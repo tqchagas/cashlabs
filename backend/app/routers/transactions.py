@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Transaction, User
+from ..models import Category, Transaction, User
 from ..schemas import TransactionIn
 from ..utils import build_dedupe_hash, normalize_description
 
@@ -19,6 +19,7 @@ def serialize_transaction(tx: Transaction) -> dict:
         "description": tx.description,
         "amount_cents": tx.amount_cents,
         "category_id": tx.category_id,
+        "category_name": None,
         "account_id": tx.account_id,
         "source": tx.source,
     }
@@ -67,7 +68,23 @@ def list_transactions(
         q = q.filter(Transaction.description.ilike(f"%{query}%"))
 
     txs = q.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
-    return [serialize_transaction(tx) for tx in txs]
+    category_ids = [tx.category_id for tx in txs if tx.category_id is not None]
+    category_name_by_id: dict[int, str] = {}
+    if category_ids:
+        rows = (
+            db.query(Category.id, Category.name)
+            .filter(Category.user_id == user.id, Category.id.in_(category_ids))
+            .all()
+        )
+        category_name_by_id = {int(cat_id): cat_name for cat_id, cat_name in rows}
+
+    return [
+        {
+            **serialize_transaction(tx),
+            "category_name": category_name_by_id.get(tx.category_id) if tx.category_id else None,
+        }
+        for tx in txs
+    ]
 
 
 @router.patch("/{transaction_id}")

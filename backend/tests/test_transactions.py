@@ -23,6 +23,7 @@ def test_create_category_and_manual_transaction(client: TestClient, user_token: 
     lst = client.get("/transactions?query=mercado", headers=headers)
     assert lst.status_code == 200
     assert len(lst.json()) == 1
+    assert lst.json()[0]["category_name"] == "Mercado"
 
 
 def test_update_and_delete_transaction(client: TestClient, user_token: str) -> None:

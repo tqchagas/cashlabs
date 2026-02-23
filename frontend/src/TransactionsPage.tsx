@@ -7,12 +7,8 @@ type Transaction = {
   description: string;
   amount_cents: number;
   category_id: number | null;
+  category_name?: string | null;
   source: string;
-};
-
-type Category = {
-  id: number;
-  name: string;
 };
 
 type TransactionsPageProps = {
@@ -40,26 +36,13 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-
-  const categoryNameById = useMemo(
-    () =>
-      new Map<number, string>(
-        categories.map((category) => [category.id, category.name])
-      ),
-    [categories]
-  );
 
   async function loadData() {
     setLoading(true);
     setMessage("");
     try {
-      const [txRes, catRes] = await Promise.all([
-        api.get<Transaction[]>("/transactions", { headers: authHeaders }),
-        api.get<Category[]>("/categories", { headers: authHeaders }),
-      ]);
+      const txRes = await api.get<Transaction[]>("/transactions", { headers: authHeaders });
       setTransactions(txRes.data);
-      setCategories(catRes.data);
     } catch (error: any) {
       if (error?.response?.status === 401 && onLogout) {
         onLogout();
@@ -132,7 +115,7 @@ export function TransactionsPage({ token, apiBaseUrl, onBack, onLogout }: Transa
               {transactions.map((row) => (
                 <tr key={row.id}>
                   <td>{row.description}</td>
-                  <td>{row.category_id ? categoryNameById.get(row.category_id) || "-" : "-"}</td>
+                  <td>{row.category_name || "-"}</td>
                   <td>{formatIsoDate(row.date)}</td>
                   <td>{centsToCurrency(row.amount_cents)}</td>
                   <td>{row.source}</td>

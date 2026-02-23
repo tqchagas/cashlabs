@@ -7,6 +7,7 @@ type Transaction = {
   description: string;
   amount_cents: number;
   category_id: number | null;
+  category_name?: string | null;
   account_id: number | null;
   source: string;
 };
@@ -427,18 +428,6 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
   const totalExpenseAbs = chartData.total;
   const cards = [
     {
-      label: "Balance",
-      value: centsToCurrency(summary?.balance_cents || 0),
-      badge: summary && summary.balance_cents >= 0 ? "Positive" : "Negative",
-      tone: summary && summary.balance_cents >= 0 ? "positive" : "negative",
-    },
-    {
-      label: "Incomes",
-      value: centsToCurrency(summary?.total_income_cents || 0),
-      badge: "Month total",
-      tone: "neutral",
-    },
-    {
       label: "Expenses",
       value: centsToCurrency(summary?.total_expenses_cents || 0),
       badge: "Month total",
@@ -676,7 +665,7 @@ export function Dashboard({ token, apiBaseUrl, onLogout, onViewAllTransactions }
                         row.description
                       )}
                     </td>
-                    <td>{row.category_id ? categoryNameById.get(row.category_id) || "-" : "-"}</td>
+                    <td>{row.category_name || (row.category_id ? categoryNameById.get(row.category_id) || "-" : "-")}</td>
                     <td>
                       {editingTxId === row.id ? (
                         <input value={editDate} onChange={(e) => setEditDate(e.target.value)} placeholder="YYYY-MM-DD" />
