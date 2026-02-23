@@ -9,3 +9,4 @@ msoffcrypto-tool
 pytest
 httpx
 email-validator
+psycopg[binary]
